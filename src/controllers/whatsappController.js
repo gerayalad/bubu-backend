@@ -107,7 +107,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = await generateNaturalResponse({
                     action: 'registrar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: normalizedPhone
                 });
                 break;
 
@@ -116,7 +117,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = await generateNaturalResponse({
                     action: 'consultar_estado',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: normalizedPhone
                 });
                 break;
 
@@ -140,7 +142,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = await generateNaturalResponse({
                     action: 'eliminar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: normalizedPhone
                 });
                 break;
 
@@ -149,7 +152,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = await generateNaturalResponse({
                     action: 'editar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: normalizedPhone
                 });
                 break;
 

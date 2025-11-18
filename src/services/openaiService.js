@@ -5,6 +5,7 @@
 
 import openai from '../config/openai.js';
 import { getAllCategories } from './categoryService.js';
+import { getChatHistory } from './chatService.js';
 
 /**
  * Define las funciones que OpenAI puede invocar
@@ -204,78 +205,55 @@ export async function parseIntent(mensaje, userPhone = null) {
         const functions = getOpenAIFunctions();
         const today = new Date().toISOString().split('T')[0];
 
-        const systemPrompt = `Eres un asistente de finanzas personales llamado BUBU.
-Tu trabajo es interpretar los mensajes del usuario y determinar qué acción quiere realizar.
+        // Obtener historial de conversación para contexto
+        const chatHistory = userPhone ? getChatHistory(userPhone, 10) : [];
+
+        const systemPrompt = `Eres BUBU, un asistente de finanzas personales amigable e inteligente.
 
 Fecha actual: ${today}
 
-IMPORTANTE - Interpretación de periodos temporales:
-- "este mes", "mes actual", "en lo que va del mes", "cuánto llevo gastado" → periodo: mes_actual
-- "mes pasado", "el mes pasado", "mes anterior", "mes que pasó" → periodo: mes_pasado
-- "esta semana", "en la semana", "semana actual" → periodo: semana_actual
-- "hoy", "el día de hoy", "día actual" → periodo: hoy
-- Fechas específicas o rangos → periodo: personalizado (con fecha_inicio y fecha_fin)
+Tu trabajo es entender qué quiere hacer el usuario y llamar a la función apropiada.
 
-Cuando el usuario mencione fechas relativas (ayer, hoy, antier, etc.), calcula la fecha exacta en formato YYYY-MM-DD.
+CATEGORIZACIÓN INTELIGENTE:
+- "tacos", "pizza", "restaurante" → Comida
+- "uber", "gasolina", "taxi" → Transporte
+- "luz", "agua", "internet", "netflix" → Servicios
+- Usa tu conocimiento para inferir la categoría correcta
 
-Ejemplos de interpretación:
+PERIODOS TEMPORALES:
+- "este mes", "mes actual", "cuánto llevo" → mes_actual
+- "mes pasado", "mes anterior" → mes_pasado
+- "esta semana" → semana_actual
+- "hoy" → hoy
+- Fechas específicas → personalizado
 
-REGISTRAR TRANSACCIONES:
-- "gasté 350 en tacos" → registrar_transaccion (tipo: gasto, monto: 350, categoria: Comida)
-- "ayer pagué 200 de uber" → registrar_transaccion (tipo: gasto, monto: 200, categoria: Transporte, fecha: ayer)
-- "me cayó la nómina de 15000" → registrar_transaccion (tipo: ingreso, monto: 15000, categoria: Nómina)
+FECHAS RELATIVAS:
+- "ayer", "antier", "mañana" → calcula la fecha exacta en YYYY-MM-DD
 
-CONSULTAR ESTADO - MES ACTUAL:
-- "¿cómo voy este mes?" → consultar_estado (periodo: mes_actual)
-- "¿cuánto llevo gastado?" → consultar_estado (periodo: mes_actual, filtro_tipo: gasto)
-- "¿cuánto he gastado en comida?" → consultar_estado (periodo: mes_actual, filtro_categoria: Comida, filtro_tipo: gasto)
-- "¿cuál es mi estado actual?" → consultar_estado (periodo: mes_actual)
+Usa el historial de conversación para entender referencias como "elimínalo", "el de tacos", etc.`;
 
-CONSULTAR ESTADO - MES PASADO:
-- "¿cómo me fue el mes pasado?" → consultar_estado (periodo: mes_pasado)
-- "¿cuánto gasté el mes anterior?" → consultar_estado (periodo: mes_pasado, filtro_tipo: gasto)
-- "gastos del mes pasado" → consultar_estado (periodo: mes_pasado, filtro_tipo: gasto)
-- "quiero saber mis gastos del mes pasado" → consultar_estado (periodo: mes_pasado, filtro_tipo: gasto)
-- "gastos en comida del mes que pasó" → consultar_estado (periodo: mes_pasado, filtro_categoria: Comida, filtro_tipo: gasto)
+        // Construir mensajes con historial
+        const messages = [
+            { role: 'system', content: systemPrompt }
+        ];
 
-CONSULTAR ESTADO - OTROS PERIODOS:
-- "¿cómo voy esta semana?" → consultar_estado (periodo: semana_actual)
-- "gastos de hoy" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
-- "¿cuánto gané esta semana?" → consultar_estado (periodo: semana_actual, filtro_tipo: ingreso)
+        // Agregar últimos mensajes para contexto (máximo 10)
+        chatHistory.slice(-10).forEach(msg => {
+            messages.push({
+                role: msg.role,
+                content: msg.message
+            });
+        });
 
-LISTAR TRANSACCIONES DETALLE (cuando quieren VER la lista específica):
-- "¿qué servicios tengo registrados?" → listar_transacciones (categoria: Servicios, tipo: gasto, periodo: todos)
-- "muestra mis gastos en comida" → listar_transacciones (categoria: Comida, tipo: gasto, periodo: todos)
-- "ver mis gastos de transporte" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: todos)
-- "lista mis ingresos" → listar_transacciones (tipo: ingreso, periodo: todos)
-- "qué gastos tengo en comida del mes pasado" → listar_transacciones (categoria: Comida, tipo: gasto, periodo: mes_pasado)
-- "muestra los servicios de este mes" → listar_transacciones (categoria: Servicios, tipo: gasto, periodo: mes_actual)
-- "ver transacciones de transporte de la semana" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: semana_actual)
-
-ELIMINAR TRANSACCIONES:
-- "elimina el 1" → eliminar_transaccion (numero: 1)
-- "borra el 2" → eliminar_transaccion (numero: 2)
-- "quita la transacción 3" → eliminar_transaccion (numero: 3)
-- Si acaba de ver una lista y dice "elimina el gasto de comida" o "elimina ese gasto", infiere el número de la lista
-- Si solo hay 1 transacción en la lista y dice "elimínalo", "bórralo", "elimina ese", usa numero: 1
-
-EDITAR TRANSACCIONES:
-- "cambia el 1 a 500" → editar_transaccion (numero: 1, nuevo_monto: 500)
-- "edita el 2 a $600" → editar_transaccion (numero: 2, nuevo_monto: 600)
-- "modifica la transacción 3 a 1000" → editar_transaccion (numero: 3, nuevo_monto: 1000)
-
-Sé inteligente al categorizar. Si el usuario dice "tacos", "pizza", "restaurante" → categoría Comida.
-Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
+        // Agregar mensaje actual
+        messages.push({ role: 'user', content: mensaje });
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
-            messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: mensaje }
-            ],
+            model: 'gpt-5-mini',
+            messages: messages,
             functions: functions,
             function_call: 'auto',
-            temperature: 0.3
+            temperature: 0.4
         });
 
         const message = response.choices[0].message;
@@ -314,131 +292,102 @@ Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
  */
 export async function generateNaturalResponse(data) {
     try {
-        const { action, result, userMessage } = data;
+        const { action, result, userMessage, userPhone } = data;
 
-        let prompt = '';
+        // Obtener historial de conversación para contexto
+        const chatHistory = userPhone ? getChatHistory(userPhone, 10) : [];
+
+        // Preparar contexto basado en la acción
+        let contextData = '';
 
         switch (action) {
             case 'registrar_transaccion':
-                prompt = `El usuario registró una transacción: ${JSON.stringify(result)}.
-Genera una confirmación breve y amigable (1-2 líneas) confirmando que se registró el ${result.type === 'expense' ? 'gasto' : 'ingreso'} de $${result.amount} en ${result.category_name}.`;
+                contextData = `Acción: Registrar transacción
+Tipo: ${result.type === 'expense' ? 'Gasto' : 'Ingreso'}
+Monto: $${result.amount}
+Categoría: ${result.category_name}
+Descripción: ${result.description}`;
                 break;
 
             case 'consultar_estado':
-                const summary = result;
-
-                // Mapear periodo a texto legible en español
                 const periodoTexto = {
                     'mes_actual': 'este mes',
                     'mes_pasado': 'el mes pasado',
                     'semana_actual': 'esta semana',
-                    'hoy': 'hoy',
-                    'personalizado': `del ${summary.period.startDate} al ${summary.period.endDate}`
+                    'hoy': 'hoy'
                 };
+                const periodo = periodoTexto[result.periodo] || 'en el periodo consultado';
+                const hasData = result.totals.income > 0 || result.totals.expense > 0;
 
-                const periodoDescripcion = periodoTexto[summary.periodo] || 'en el periodo consultado';
-                const hasData = summary.totals.income > 0 || summary.totals.expense > 0;
+                if (hasData) {
+                    const topCategories = result.byCategory.slice(0, 2).map(c =>
+                        `${c.category}: $${c.total}`
+                    ).join(', ');
 
-                if (!hasData) {
-                    // Caso especial: No hay datos
-                    prompt = `El usuario consultó su estado financiero de ${periodoDescripcion}, pero NO HAY DATOS registrados aún.
-
-Genera una respuesta amigable y útil (2-3 líneas) que:
-1. Mencione que aún no ha registrado movimientos en ${periodoDescripcion}
-2. Lo invite a empezar a registrar
-3. Le dé un ejemplo de cómo hacerlo
-
-Ejemplo: "Aún no has registrado movimientos ${periodoDescripcion}. ¡Empecemos! Puedes decirme algo como: 'gasté 500 en comida' o 'me llegó la nómina de 15000' 💰"`;
+                    contextData = `Acción: Consultar estado financiero
+Periodo: ${periodo}
+Ingresos: $${result.totals.income}
+Gastos: $${result.totals.expense}
+Balance: $${result.totals.balance}
+Top categorías: ${topCategories}`;
                 } else {
-                    // Caso normal: Hay datos
-                    prompt = `El usuario consultó su estado financiero de ${periodoDescripcion}.
-
-Periodo: ${periodoDescripcion}
-Fechas: ${summary.period.startDate} al ${summary.period.endDate}
-Ingresos: $${summary.totals.income}
-Gastos: $${summary.totals.expense}
-Balance: $${summary.totals.balance}
-
-Genera un resumen conversacional (3-4 líneas) que:
-1. IMPORTANTE: Mencione claramente el periodo temporal (${periodoDescripcion}) en la primera frase
-2. Mencione los totales de ingresos y gastos
-3. Indique el balance (positivo o negativo)
-4. Si hay categorías, menciona las 2 principales donde más gastó
-5. Sea amigable y motivador
-
-Categorías principales: ${JSON.stringify(summary.byCategory.slice(0, 3))}
-
-Ejemplo: "${periodoDescripcion === 'el mes pasado' ? 'El mes pasado' : periodoDescripcion === 'este mes' ? 'En lo que va de este mes' : periodoDescripcion === 'hoy' ? 'El día de hoy' : 'En el periodo consultado'} tuviste ingresos de $${summary.totals.income} y gastos de $${summary.totals.expense}. Tu balance es de $${summary.totals.balance}."`;
-                }
-                break;
-
-            case 'listar_transacciones':
-                if (result.length === 0) {
-                    prompt = `El usuario pidió ver transacciones pero NO HAY NINGUNA que coincida con los filtros.
-Genera una respuesta amigable (2-3 líneas) diciendo que no encontraste transacciones y sugiriendo que registre algunas.`;
-                } else {
-                    // Formatear lista numerada
-                    const listaFormateada = result.map((t, index) =>
-                        `${index + 1}. $${t.amount} - ${t.description} (${t.category_name}) - ${t.transaction_date}`
-                    ).join('\n');
-
-                    prompt = `El usuario pidió ver sus transacciones. Encontraste ${result.length} transacciones.
-
-IMPORTANTE: Debes mostrar la lista EXACTAMENTE como está formateada abajo, con números y todo. NO la reformules.
-
-Lista de transacciones:
-${listaFormateada}
-
-Genera una respuesta que:
-1. Diga cuántas transacciones encontraste
-2. Muestre la lista EXACTAMENTE como está arriba (copia y pega)
-3. Mencione que puede decir "elimina el 1" o "cambia el 2 a $600" para gestionar las transacciones`;
+                    contextData = `Acción: Consultar estado financiero
+Periodo: ${periodo}
+Estado: Sin movimientos registrados`;
                 }
                 break;
 
             case 'eliminar_transaccion':
-                prompt = `El usuario eliminó la transacción #${result.numero}: $${result.deleted.amount} - ${result.deleted.description}.
-
-Genera una confirmación breve (1-2 líneas) diciendo que se eliminó correctamente.`;
+                contextData = `Acción: Eliminar transacción #${result.numero}
+Monto: $${result.deleted.amount}
+Descripción: ${result.deleted.description}`;
                 break;
 
             case 'editar_transaccion':
-                prompt = `El usuario editó la transacción #${result.numero}.
-Cambió el monto de $${result.oldAmount} a $${result.newAmount}.
-Descripción: ${result.transaction.description}
-
-Genera una confirmación breve (1-2 líneas) diciendo que se actualizó el monto correctamente.`;
+                contextData = `Acción: Editar transacción #${result.numero}
+Monto anterior: $${result.oldAmount}
+Monto nuevo: $${result.newAmount}
+Descripción: ${result.transaction.description}`;
                 break;
 
             default:
-                return 'Mensaje recibido. ¿En qué más puedo ayudarte?';
+                contextData = 'Acción completada';
         }
 
-        const response = await openai.chat.completions.create({
-            model: 'gpt-4',
-            messages: [
-                {
-                    role: 'system',
-                    content: `Eres BUBU, un asistente de finanzas personales amigable, positivo y profesional.
+        // Construir mensajes con historial
+        const messages = [
+            {
+                role: 'system',
+                content: `Eres BUBU, un asistente de finanzas personales amigable y conversacional.
 
-REGLAS IMPORTANTES:
-- NUNCA digas que estás "confundido" o que "no entiendes"
-- NUNCA menciones problemas técnicos o errores
-- SIEMPRE sé útil y proactivo
-- Si no hay datos, sugiere qué hacer (ej: "Aún no has registrado gastos. Prueba escribir: 'gasté 500 en comida'")
-- Usa un tono casual pero profesional
-- Usa emojis ocasionalmente pero sin exagerar (máximo 2 por mensaje)
-- Máximo 3-4 líneas
-- Sé específico con números y fechas
-- Usa lenguaje positivo y motivador`
-                },
-                {
-                    role: 'user',
-                    content: prompt
-                }
-            ],
-            temperature: 0.7,
-            max_tokens: 200
+Responde de manera natural y breve (2-3 líneas máximo).
+Usa emojis ocasionalmente (máximo 1-2).
+Sé positivo, útil y motivador.
+Habla como si fueras un amigo que ayuda con finanzas.`
+            }
+        ];
+
+        // Agregar últimos mensajes para contexto
+        chatHistory.slice(-6).forEach(msg => {
+            messages.push({
+                role: msg.role,
+                content: msg.message
+            });
+        });
+
+        // Agregar contexto de la acción ejecutada
+        messages.push({
+            role: 'user',
+            content: `${contextData}
+
+Genera una respuesta natural confirmando esta acción. Sé breve y amigable.`
+        });
+
+        const response = await openai.chat.completions.create({
+            model: 'gpt-5-mini',
+            messages: messages,
+            temperature: 0.8,
+            max_tokens: 150
         });
 
         return response.choices[0].message.content.trim();

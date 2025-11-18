@@ -49,7 +49,8 @@ export async function processMessage(req, res) {
                 response = await generateNaturalResponse({
                     action: 'registrar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: user_phone
                 });
                 break;
 
@@ -58,7 +59,8 @@ export async function processMessage(req, res) {
                 response = await generateNaturalResponse({
                     action: 'consultar_estado',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: user_phone
                 });
                 break;
 
@@ -84,7 +86,8 @@ export async function processMessage(req, res) {
                 response = await generateNaturalResponse({
                     action: 'eliminar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: user_phone
                 });
                 break;
 
@@ -93,7 +96,8 @@ export async function processMessage(req, res) {
                 response = await generateNaturalResponse({
                     action: 'editar_transaccion',
                     result,
-                    userMessage: message
+                    userMessage: message,
+                    userPhone: user_phone
                 });
                 break;
 
