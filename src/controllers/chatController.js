@@ -8,7 +8,7 @@ import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage, getChatHistory } from '../services/chatService.js';
-import { saveTransactionList, getTransactionByNumber, getPendingReceipt, savePendingReceipt, clearPendingReceipt } from '../services/contextService.js';
+import { saveTransactionList, getTransactionByNumber, getPendingReceipt, savePendingReceipt, clearPendingReceipt, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction } from '../services/contextService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
 import { saveReceiptImage } from '../services/receiptService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
@@ -30,6 +30,95 @@ export async function processMessage(req, res) {
 
         // Crear o obtener usuario
         const user = await getOrCreateUser(user_phone);
+
+        // DETECCIÓN TEMPRANA: Verificar si hay una transacción pendiente de confirmación
+        const pendingTx = getPendingTransaction(user_phone);
+        if (pendingTx) {
+            const lowerMsg = message.toLowerCase().trim();
+
+            // Detectar confirmación afirmativa
+            const affirmativeWords = ['sí', 'si', 'ok', 'confirmo', 'confirma', 'está bien', 'correcto', 'exacto', 'dale', 'va'];
+            const isAffirmative = affirmativeWords.some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
+
+            // Detectar cancelación
+            const cancelWords = ['no', 'cancelar', 'cancela', 'borrar', 'borra', 'descartar'];
+            const isCancel = cancelWords.some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
+
+            if (isAffirmative) {
+                // Guardar mensaje del usuario
+                await saveChatMessage({
+                    user_phone: user.phone,
+                    role: 'user',
+                    message,
+                    intent_json: { action: 'confirmar_transaccion_pendiente' }
+                });
+
+                // Crear la transacción en la base de datos
+                const transaction = await createTransaction({
+                    user_phone,
+                    category_id: pendingTx.categoria_id,
+                    type: pendingTx.type,
+                    amount: pendingTx.monto,
+                    description: pendingTx.descripcion,
+                    transaction_date: pendingTx.fecha
+                });
+
+                // Guardar referencia para posibles correcciones
+                saveLastTransaction(user_phone, transaction);
+
+                // Limpiar transacción pendiente
+                clearPendingTransaction(user_phone);
+
+                const emoji = transaction.type === 'expense' ? '💳' : '💰';
+                const tipoText = transaction.type === 'expense' ? 'gasto' : 'ingreso';
+                const response = `✅ ¡Listo! Registré tu ${tipoText} de $${transaction.amount} en ${pendingTx.categoria} ${emoji}`;
+
+                await saveChatMessage({
+                    user_phone: user.phone,
+                    role: 'assistant',
+                    message: response,
+                    intent_json: null
+                });
+
+                return res.json({
+                    success: true,
+                    data: {
+                        intent: 'confirmar_transaccion_pendiente',
+                        response,
+                        result: transaction
+                    }
+                });
+            } else if (isCancel) {
+                // Cancelar la transacción pendiente
+                clearPendingTransaction(user_phone);
+
+                await saveChatMessage({
+                    user_phone: user.phone,
+                    role: 'user',
+                    message,
+                    intent_json: { action: 'cancelar_transaccion_pendiente' }
+                });
+
+                const response = '❌ Transacción cancelada. ¿Hay algo más en lo que pueda ayudarte?';
+
+                await saveChatMessage({
+                    user_phone: user.phone,
+                    role: 'assistant',
+                    message: response,
+                    intent_json: null
+                });
+
+                return res.json({
+                    success: true,
+                    data: {
+                        intent: 'cancelar_transaccion_pendiente',
+                        response,
+                        result: null
+                    }
+                });
+            }
+            // Si no es afirmativo ni cancelación, continuar con el flujo normal (puede ser una corrección)
+        }
 
         // Parsear intent con OpenAI
         const intent = await parseIntent(message, user_phone);
@@ -153,6 +242,16 @@ export async function processMessage(req, res) {
                 response = result.response;
                 break;
 
+            case 'confirmar_transaccion':
+                result = await handleConfirmarTransaccion(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'corregir_ultima_transaccion':
+                result = await handleCorregirUltimaTransaccion(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
             default:
                 result = null;
                 response = 'No estoy seguro de cómo ayudarte con eso. ¿Podrías ser más específico?';
@@ -225,6 +324,9 @@ async function handleRegistrarTransaccion(user_phone, params) {
         description: descripcion,
         transaction_date: transactionDate
     });
+
+    // Guardar referencia para posibles correcciones
+    saveLastTransaction(user_phone, transaction);
 
     return transaction;
 }
@@ -929,6 +1031,168 @@ export async function processImageMessage(req, res) {
             success: false,
             error: error.message || 'Error al procesar la imagen'
         });
+    }
+}
+
+/**
+ * Prepara una transacción para confirmación del usuario
+ */
+async function handleConfirmarTransaccion(user_phone, params) {
+    const { tipo, monto, descripcion, categoria, fecha } = params;
+
+    // Convertir tipo a formato de BD
+    const type = tipo === 'gasto' ? 'expense' : 'income';
+
+    // Buscar categoría
+    let category = await getCategoryByName(categoria);
+
+    // Si no se encuentra, sugerir una basada en la descripción
+    if (!category) {
+        category = await suggestCategory(descripcion, type);
+    }
+
+    if (!category) {
+        throw new Error(`No encontré la categoría "${categoria}"`);
+    }
+
+    // Calcular fecha
+    let transactionDate = fecha;
+    if (!transactionDate) {
+        transactionDate = getTodayMexico();
+    }
+
+    // Guardar en contexto pendiente (NO crear en BD todavía)
+    const pendingData = {
+        tipo,
+        monto,
+        descripcion,
+        categoria: category.name,
+        categoria_id: category.id,
+        fecha: transactionDate,
+        type
+    };
+
+    savePendingTransaction(user_phone, pendingData);
+
+    // Formatear la fecha para mostrar
+    const [year, month, day] = transactionDate.split('-');
+    const displayDate = `${day}/${month}`;
+
+    // Preparar emoji según tipo
+    const emoji = type === 'expense' ? '💳' : '💰';
+    const tipoText = type === 'expense' ? 'Gasto' : 'Ingreso';
+
+    // Generar respuesta de confirmación
+    const response = `📝 ¿Confirmas esta transacción?
+
+${emoji} **$${monto.toFixed(2)}**
+📁 ${category.name}
+📝 ${descripcion}
+📅 ${displayDate}
+${tipoText}
+
+Responde "sí" para confirmar, "cancelar" para descartar, o "cambiar [campo]" para modificar.`;
+
+    return {
+        response
+    };
+}
+
+/**
+ * Corrige un campo de la última transacción creada
+ */
+async function handleCorregirUltimaTransaccion(user_phone, params) {
+    const { campo, nuevo_valor_categoria, nuevo_valor_monto, nuevo_valor_descripcion, nuevo_valor_fecha } = params;
+
+    // Obtener la última transacción del usuario
+    const lastTx = getLastTransaction(user_phone);
+
+    if (!lastTx) {
+        return {
+            response: '🤔 No encuentro ninguna transacción reciente para corregir. Las correcciones solo están disponibles por 10 minutos después de crear una transacción.'
+        };
+    }
+
+    // Preparar datos de actualización según el campo
+    const updateData = {};
+
+    switch (campo) {
+        case 'categoria':
+            if (!nuevo_valor_categoria) {
+                return { response: '❌ Necesito saber a qué categoría quieres cambiarla.' };
+            }
+            const category = await getCategoryByName(nuevo_valor_categoria);
+            if (!category) {
+                return { response: `❌ No encontré la categoría "${nuevo_valor_categoria}".` };
+            }
+            updateData.category_id = category.id;
+            break;
+
+        case 'monto':
+            if (!nuevo_valor_monto) {
+                return { response: '❌ Necesito saber cuál es el monto correcto.' };
+            }
+            updateData.amount = nuevo_valor_monto;
+            break;
+
+        case 'descripcion':
+            if (!nuevo_valor_descripcion) {
+                return { response: '❌ Necesito saber cuál es la descripción correcta.' };
+            }
+            updateData.description = nuevo_valor_descripcion;
+            break;
+
+        case 'fecha':
+            if (!nuevo_valor_fecha) {
+                return { response: '❌ Necesito saber cuál es la fecha correcta (formato: YYYY-MM-DD).' };
+            }
+            updateData.transaction_date = nuevo_valor_fecha;
+            break;
+
+        default:
+            return { response: '❌ Campo no válido. Puedes corregir: categoría, monto, descripción o fecha.' };
+    }
+
+    // Actualizar la transacción
+    try {
+        const updatedTransaction = await updateTransaction(lastTx.id, user_phone, updateData);
+
+        // Actualizar la referencia en contexto
+        saveLastTransaction(user_phone, updatedTransaction);
+
+        // Generar respuesta
+        let fieldName;
+        let newValue;
+
+        switch (campo) {
+            case 'categoria':
+                fieldName = 'categoría';
+                newValue = nuevo_valor_categoria;
+                break;
+            case 'monto':
+                fieldName = 'monto';
+                newValue = `$${nuevo_valor_monto}`;
+                break;
+            case 'descripcion':
+                fieldName = 'descripción';
+                newValue = nuevo_valor_descripcion;
+                break;
+            case 'fecha':
+                fieldName = 'fecha';
+                const [year, month, day] = nuevo_valor_fecha.split('-');
+                newValue = `${day}/${month}/${year}`;
+                break;
+        }
+
+        return {
+            response: `✅ Listo, actualicé ${fieldName} a: **${newValue}**`
+        };
+
+    } catch (error) {
+        console.error('Error corrigiendo transacción:', error);
+        return {
+            response: `❌ Error al corregir la transacción: ${error.message}`
+        };
     }
 }
 

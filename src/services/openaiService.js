@@ -17,7 +17,7 @@ async function getOpenAIFunctions() {
     return [
         {
             name: 'registrar_transaccion',
-            description: 'Registra un gasto o ingreso del usuario. Usa esta función cuando el usuario mencione que gastó dinero, pagó algo, recibió dinero, le pagaron, etc.',
+            description: 'DEPRECADO - Usa confirmar_transaccion en su lugar. Esta función solo debe usarse si el usuario explícitamente pide registrar sin confirmación.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -226,6 +226,70 @@ async function getOpenAIFunctions() {
                     }
                 },
                 required: ['monto']
+            }
+        },
+        {
+            name: 'confirmar_transaccion',
+            description: 'Prepara una transacción para confirmación del usuario (NO la guarda todavía). Usa esta función cuando el usuario mencione un gasto o ingreso nuevo. Ejemplos: "gasté 319 en Disney Plus", "pagué 150 de comida", "recibí 1000 de mi salario".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    tipo: {
+                        type: 'string',
+                        enum: ['gasto', 'ingreso'],
+                        description: 'Tipo de transacción: "gasto" si es un egreso, "ingreso" si es dinero recibido'
+                    },
+                    monto: {
+                        type: 'number',
+                        description: 'Monto de la transacción en pesos mexicanos (solo número, sin símbolo de moneda)'
+                    },
+                    descripcion: {
+                        type: 'string',
+                        description: 'Descripción breve de la transacción según lo que dijo el usuario'
+                    },
+                    categoria: {
+                        type: 'string',
+                        description: 'Nombre de la categoría más apropiada para esta transacción',
+                        enum: categories.map(c => c.name)
+                    },
+                    fecha: {
+                        type: 'string',
+                        description: 'Fecha de la transacción en formato YYYY-MM-DD. Si el usuario dice "ayer", "hoy", "antier", etc., calcula la fecha correcta. Si no se especifica, usa la fecha actual.'
+                    }
+                },
+                required: ['tipo', 'monto', 'descripcion', 'categoria']
+            }
+        },
+        {
+            name: 'corregir_ultima_transaccion',
+            description: 'Corrige un campo de la última transacción que se creó. Usa esta cuando el usuario indique que algo está mal en la transacción que acaba de crear. Ejemplos: "no, debería estar en Entretenimiento", "no, el monto es 200", "no es correcto, la descripción es Netflix", "cambia la categoría a Comida".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    campo: {
+                        type: 'string',
+                        enum: ['categoria', 'monto', 'descripcion', 'fecha'],
+                        description: 'Campo a corregir: categoria, monto, descripcion, o fecha'
+                    },
+                    nuevo_valor_categoria: {
+                        type: 'string',
+                        description: 'Nuevo nombre de categoría (solo si campo es "categoria")',
+                        enum: categories.map(c => c.name)
+                    },
+                    nuevo_valor_monto: {
+                        type: 'number',
+                        description: 'Nuevo monto (solo si campo es "monto")'
+                    },
+                    nuevo_valor_descripcion: {
+                        type: 'string',
+                        description: 'Nueva descripción (solo si campo es "descripcion")'
+                    },
+                    nuevo_valor_fecha: {
+                        type: 'string',
+                        description: 'Nueva fecha en formato YYYY-MM-DD (solo si campo es "fecha")'
+                    }
+                },
+                required: ['campo']
             }
         },
         {

@@ -9,7 +9,7 @@ import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
-import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction } from '../services/contextService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
 import {
     saveTransactionContext,

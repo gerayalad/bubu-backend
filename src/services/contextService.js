@@ -122,6 +122,108 @@ export function clearPendingReceipt(userPhone) {
     }
 }
 
+/**
+ * Guarda una transacción pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @param {object} transactionData - Datos de la transacción pendiente
+ */
+export function savePendingTransaction(userPhone, transactionData) {
+    const context = userContext.get(userPhone) || {};
+    context.pendingTransaction = {
+        ...transactionData,
+        timestamp: new Date()
+    };
+    userContext.set(userPhone, context);
+}
+
+/**
+ * Obtiene la transacción pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @returns {object|null} Transacción pendiente o null
+ */
+export function getPendingTransaction(userPhone) {
+    const context = userContext.get(userPhone);
+
+    if (!context || !context.pendingTransaction) {
+        return null;
+    }
+
+    // Verificar que el contexto no sea muy viejo (más de 5 minutos)
+    const now = new Date();
+    const diff = now - context.pendingTransaction.timestamp;
+    const minutes = diff / 1000 / 60;
+
+    if (minutes > 5) {
+        // Contexto expirado
+        delete context.pendingTransaction;
+        return null;
+    }
+
+    return context.pendingTransaction;
+}
+
+/**
+ * Limpia la transacción pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ */
+export function clearPendingTransaction(userPhone) {
+    const context = userContext.get(userPhone);
+    if (context) {
+        delete context.pendingTransaction;
+    }
+}
+
+/**
+ * Guarda referencia a la última transacción creada (para correcciones)
+ * @param {string} userPhone - Teléfono del usuario
+ * @param {object} transaction - Transacción creada
+ */
+export function saveLastTransaction(userPhone, transaction) {
+    const context = userContext.get(userPhone) || {};
+    context.lastTransaction = {
+        ...transaction,
+        timestamp: new Date()
+    };
+    userContext.set(userPhone, context);
+}
+
+/**
+ * Obtiene la última transacción creada
+ * @param {string} userPhone - Teléfono del usuario
+ * @returns {object|null} Última transacción o null
+ */
+export function getLastTransaction(userPhone) {
+    const context = userContext.get(userPhone);
+
+    if (!context || !context.lastTransaction) {
+        return null;
+    }
+
+    // Verificar que el contexto no sea muy viejo (más de 10 minutos)
+    const now = new Date();
+    const diff = now - context.lastTransaction.timestamp;
+    const minutes = diff / 1000 / 60;
+
+    if (minutes > 10) {
+        // Contexto expirado
+        delete context.lastTransaction;
+        return null;
+    }
+
+    return context.lastTransaction;
+}
+
+/**
+ * Limpia la referencia a la última transacción
+ * @param {string} userPhone - Teléfono del usuario
+ */
+export function clearLastTransaction(userPhone) {
+    const context = userContext.get(userPhone);
+    if (context) {
+        delete context.lastTransaction;
+    }
+}
+
 export default {
     saveTransactionList,
     getTransactionByNumber,
@@ -129,5 +231,11 @@ export default {
     getTransactionList,
     savePendingReceipt,
     getPendingReceipt,
-    clearPendingReceipt
+    clearPendingReceipt,
+    savePendingTransaction,
+    getPendingTransaction,
+    clearPendingTransaction,
+    saveLastTransaction,
+    getLastTransaction,
+    clearLastTransaction
 };
