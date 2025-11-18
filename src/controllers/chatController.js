@@ -11,6 +11,7 @@ import { saveChatMessage, getChatHistory } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber, getPendingReceipt, savePendingReceipt, clearPendingReceipt } from '../services/contextService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
 import { saveReceiptImage } from '../services/receiptService.js';
+import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
 
 /**
  * Procesa un mensaje del usuario
@@ -212,7 +213,7 @@ async function handleRegistrarTransaccion(user_phone, params) {
     // Calcular fecha
     let transactionDate = fecha;
     if (!transactionDate) {
-        transactionDate = new Date().toISOString().split('T')[0];
+        transactionDate = getTodayMexico();
     }
 
     // Crear transacción
@@ -274,8 +275,8 @@ async function handleConsultarEstado(user_phone, params) {
 
     // Obtener resumen
     const summary = await getFinancialSummary(user_phone, {
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0]
+        startDate: toMexicoDateString(startDate),
+        endDate: toMexicoDateString(endDate)
     });
 
     // Agregar el periodo original al summary para contexto
@@ -352,8 +353,8 @@ async function handleListarTransacciones(user_phone, params) {
         }
 
         if (startDate && endDate) {
-            filters.startDate = startDate.toISOString().split('T')[0];
-            filters.endDate = endDate.toISOString().split('T')[0];
+            filters.startDate = toMexicoDateString(startDate);
+            filters.endDate = toMexicoDateString(endDate);
         }
     }
 
@@ -571,7 +572,7 @@ async function handleConfirmarReceipt(user_phone, params) {
         type: 'expense',
         amount: ocrData.amount,
         description: ocrData.description || `Compra en ${ocrData.merchant}`,
-        transaction_date: ocrData.date || new Date().toISOString().split('T')[0]
+        transaction_date: ocrData.date || getTodayMexico()
     });
 
     // Actualizar receipt en BD
@@ -637,7 +638,7 @@ async function handleCorregirReceipt(user_phone, params) {
         type: 'expense',
         amount: correctedData.amount,
         description: correctedData.description || `Compra en ${correctedData.merchant}`,
-        transaction_date: correctedData.date || new Date().toISOString().split('T')[0]
+        transaction_date: correctedData.date || getTodayMexico()
     });
 
     // Actualizar receipt en BD
@@ -701,7 +702,7 @@ async function handleProporcionarMonto(user_phone, params) {
         type: 'expense',
         amount: completeData.amount,
         description: completeData.description || `Compra en ${completeData.merchant}`,
-        transaction_date: completeData.date || new Date().toISOString().split('T')[0]
+        transaction_date: completeData.date || getTodayMexico()
     });
 
     // Actualizar receipt en BD
@@ -890,7 +891,7 @@ export async function processImageMessage(req, res) {
             type: 'expense',
             amount: data.amount,
             description: data.description || `Compra en ${data.merchant}`,
-            transaction_date: data.date || new Date().toISOString().split('T')[0]
+            transaction_date: data.date || getTodayMexico()
         });
 
         await saveReceiptImage({

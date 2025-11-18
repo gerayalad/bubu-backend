@@ -4,6 +4,7 @@
  */
 
 import { query, queryOne, execute } from '../db/connection.js';
+import { getTodayMexico, getStartOfMonthMexico, getEndOfMonthMexico } from '../utils/dateUtils.js';
 
 /**
  * Crea una nueva transacción
@@ -26,8 +27,8 @@ export async function createTransaction(data) {
         throw new Error('El monto debe ser mayor a 0');
     }
 
-    // Usar fecha actual si no se proporciona
-    const finalDate = transaction_date || new Date().toISOString().split('T')[0];
+    // Usar fecha actual de México si no se proporciona
+    const finalDate = transaction_date || getTodayMexico();
 
     const result = await execute(
         `INSERT INTO transactions (user_phone, category_id, type, amount, description, transaction_date)
@@ -112,11 +113,10 @@ export async function getUserTransactions(user_phone, filters = {}) {
  * @returns {object} Resumen con totales de ingresos, gastos y balance
  */
 export async function getFinancialSummary(user_phone, period = {}) {
-    // Si no se especifica periodo, usar el mes actual
+    // Si no se especifica periodo, usar el mes actual en zona horaria de México
     if (!period.startDate || !period.endDate) {
-        const now = new Date();
-        period.startDate = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-        period.endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+        period.startDate = getStartOfMonthMexico();
+        period.endDate = getEndOfMonthMexico();
     }
 
     // Calcular totales

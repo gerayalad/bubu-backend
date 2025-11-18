@@ -10,6 +10,7 @@ import { createTransaction, getFinancialSummary, getUserTransactions, deleteTran
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
 import {
     saveTransactionContext,
     getTransactionById,
@@ -290,7 +291,7 @@ async function handleRegistrarTransaccion(user_phone, params) {
 
     let transactionDate = fecha;
     if (!transactionDate) {
-        transactionDate = new Date().toISOString().split('T')[0];
+        transactionDate = getTodayMexico();
     }
 
     const transaction = await createTransaction({
@@ -346,8 +347,8 @@ async function handleConsultarEstado(user_phone, params) {
     }
 
     const summary = await getFinancialSummary(user_phone, {
-        startDate: startDate.toISOString().split('T')[0],
-        endDate: endDate.toISOString().split('T')[0]
+        startDate: toMexicoDateString(startDate),
+        endDate: toMexicoDateString(endDate)
     });
 
     summary.periodo = periodo;
@@ -417,8 +418,8 @@ async function handleListarTransacciones(user_phone, params) {
         }
 
         if (startDate && endDate) {
-            filters.startDate = startDate.toISOString().split('T')[0];
-            filters.endDate = endDate.toISOString().split('T')[0];
+            filters.startDate = toMexicoDateString(startDate);
+            filters.endDate = toMexicoDateString(endDate);
         }
     }
 
@@ -880,7 +881,7 @@ async function processImageMessage(user_phone, mediaId, messageId) {
             type: 'expense',
             amount: data.amount,
             description: data.description || `Compra en ${data.merchant || 'comercio'}`,
-            transaction_date: data.date || new Date().toISOString().split('T')[0]
+            transaction_date: data.date || getTodayMexico()
         });
 
         // Guardar registro de imagen

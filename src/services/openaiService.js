@@ -5,6 +5,7 @@
 
 import openai from '../config/openai.js';
 import { getAllCategories } from './categoryService.js';
+import { getTodayMexico } from '../utils/dateUtils.js';
 
 /**
  * Define las funciones que OpenAI puede invocar
@@ -246,12 +247,14 @@ async function getOpenAIFunctions() {
 }
 
 /**
- * Calcula fechas relativas (ayer, hoy, etc.)
+ * Calcula fechas relativas (ayer, hoy, etc.) en zona horaria de México
  * @param {string} referencia - Referencia temporal (hoy, ayer, etc.)
  * @returns {string} Fecha en formato YYYY-MM-DD
  */
 function calcularFechaRelativa(referencia) {
-    const hoy = new Date();
+    // Obtener fecha actual en zona horaria de México
+    const now = new Date();
+    const hoy = new Date(now.toLocaleString('en-US', { timeZone: 'America/Mexico_City' }));
 
     switch (referencia?.toLowerCase()) {
         case 'ayer':
@@ -269,7 +272,11 @@ function calcularFechaRelativa(referencia) {
             break;
     }
 
-    return hoy.toISOString().split('T')[0];
+    const year = hoy.getFullYear();
+    const month = String(hoy.getMonth() + 1).padStart(2, '0');
+    const day = String(hoy.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
 }
 
 /**
@@ -281,7 +288,7 @@ function calcularFechaRelativa(referencia) {
 export async function parseIntent(mensaje, userPhone = null) {
     try {
         const functions = await getOpenAIFunctions();
-        const today = new Date().toISOString().split('T')[0];
+        const today = getTodayMexico();
 
         const systemPrompt = `Eres un asistente de finanzas personales llamado BUBU.
 Tu trabajo es interpretar los mensajes del usuario y determinar qué acción quiere realizar.
