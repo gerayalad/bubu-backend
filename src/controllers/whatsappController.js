@@ -608,10 +608,16 @@ async function sendTransactionListInteractive(user_phone, normalizedPhone, trans
             const truncatedDesc = t.description.substring(0, Math.max(0, availableForDesc));
             const title = `${amountStr} - ${truncatedDesc}`.substring(0, maxTitleLength);
 
+            // WhatsApp requiere max 72 caracteres en la descripción
+            // Formatear fecha como DD/MM
+            const date = new Date(t.transaction_date);
+            const formattedDate = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+            const description = `${emoji} ${t.category_name} - ${formattedDate}`.substring(0, 72);
+
             return {
                 id: `view_${t.id}`,
                 title: title,
-                description: `${emoji} ${t.category_name} - ${t.transaction_date}`
+                description: description
             };
         });
 
