@@ -71,9 +71,63 @@ export function getTransactionList(userPhone) {
     return context ? context.transactions : null;
 }
 
+/**
+ * Guarda un receipt pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @param {object} receiptData - Datos del receipt pendiente
+ */
+export function savePendingReceipt(userPhone, receiptData) {
+    const context = userContext.get(userPhone) || {};
+    context.pendingReceipt = {
+        ...receiptData,
+        timestamp: new Date()
+    };
+    userContext.set(userPhone, context);
+}
+
+/**
+ * Obtiene el receipt pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @returns {object|null} Receipt pendiente o null
+ */
+export function getPendingReceipt(userPhone) {
+    const context = userContext.get(userPhone);
+
+    if (!context || !context.pendingReceipt) {
+        return null;
+    }
+
+    // Verificar que el contexto no sea muy viejo (más de 10 minutos)
+    const now = new Date();
+    const diff = now - context.pendingReceipt.timestamp;
+    const minutes = diff / 1000 / 60;
+
+    if (minutes > 10) {
+        // Contexto expirado
+        delete context.pendingReceipt;
+        return null;
+    }
+
+    return context.pendingReceipt;
+}
+
+/**
+ * Limpia el receipt pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ */
+export function clearPendingReceipt(userPhone) {
+    const context = userContext.get(userPhone);
+    if (context) {
+        delete context.pendingReceipt;
+    }
+}
+
 export default {
     saveTransactionList,
     getTransactionByNumber,
     clearContext,
-    getTransactionList
+    getTransactionList,
+    savePendingReceipt,
+    getPendingReceipt,
+    clearPendingReceipt
 };

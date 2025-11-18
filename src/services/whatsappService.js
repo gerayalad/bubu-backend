@@ -48,6 +48,105 @@ export async function sendWhatsAppMessage(to, message) {
 }
 
 /**
+ * Envía un mensaje de lista interactiva por WhatsApp
+ * @param {string} to - Número de teléfono del destinatario (sin +)
+ * @param {string} header - Encabezado de la lista
+ * @param {string} body - Cuerpo del mensaje
+ * @param {string} buttonText - Texto del botón (ej: "Ver transacciones")
+ * @param {Array} sections - Array de secciones con rows
+ * @returns {Promise<object>} Respuesta de la API
+ */
+export async function sendInteractiveList(to, header, body, buttonText, sections) {
+    try {
+        const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
+
+        const data = {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: to,
+            type: 'interactive',
+            interactive: {
+                type: 'list',
+                header: {
+                    type: 'text',
+                    text: header
+                },
+                body: {
+                    text: body
+                },
+                action: {
+                    button: buttonText,
+                    sections: sections
+                }
+            }
+        };
+
+        const response = await axios.post(url, data, {
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        console.log('✅ Lista interactiva enviada a WhatsApp:', to);
+        return response.data;
+
+    } catch (error) {
+        console.error('❌ Error enviando lista interactiva:', error.response?.data || error.message);
+        throw error;
+    }
+}
+
+/**
+ * Envía botones interactivos por WhatsApp
+ * @param {string} to - Número de teléfono del destinatario
+ * @param {string} body - Cuerpo del mensaje
+ * @param {Array} buttons - Array de botones (máximo 3)
+ * @returns {Promise<object>} Respuesta de la API
+ */
+export async function sendInteractiveButtons(to, body, buttons) {
+    try {
+        const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
+
+        const data = {
+            messaging_product: 'whatsapp',
+            recipient_type: 'individual',
+            to: to,
+            type: 'interactive',
+            interactive: {
+                type: 'button',
+                body: {
+                    text: body
+                },
+                action: {
+                    buttons: buttons.map((btn, index) => ({
+                        type: 'reply',
+                        reply: {
+                            id: btn.id,
+                            title: btn.title
+                        }
+                    }))
+                }
+            }
+        };
+
+        const response = await axios.post(url, data, {
+            headers: {
+                'Authorization': `Bearer ${ACCESS_TOKEN}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        console.log('✅ Botones interactivos enviados a WhatsApp:', to);
+        return response.data;
+
+    } catch (error) {
+        console.error('❌ Error enviando botones interactivos:', error.response?.data || error.message);
+        throw error;
+    }
+}
+
+/**
  * Marca un mensaje como leído
  * @param {string} messageId - ID del mensaje a marcar como leído
  */
@@ -121,6 +220,44 @@ export function extractMessageFromWebhook(webhookBody) {
             };
         }
 
+        if (message.type === 'interactive') {
+            const interactiveType = message.interactive.type;
+
+            // Respuesta de lista
+            if (interactiveType === 'list_reply') {
+                const replyId = message.interactive.list_reply.id;
+                const replyTitle = message.interactive.list_reply.title;
+
+                console.log(`📋 Respuesta de lista recibida de ${phone}: ${replyId} - ${replyTitle}`);
+
+                return {
+                    type: 'interactive_reply',
+                    interactiveType: 'list_reply',
+                    phone,
+                    messageId,
+                    replyId,
+                    replyTitle
+                };
+            }
+
+            // Respuesta de botón
+            if (interactiveType === 'button_reply') {
+                const replyId = message.interactive.button_reply.id;
+                const replyTitle = message.interactive.button_reply.title;
+
+                console.log(`🔘 Respuesta de botón recibida de ${phone}: ${replyId} - ${replyTitle}`);
+
+                return {
+                    type: 'interactive_reply',
+                    interactiveType: 'button_reply',
+                    phone,
+                    messageId,
+                    replyId,
+                    replyTitle
+                };
+            }
+        }
+
         // Otros tipos de mensaje no soportados (por ahora)
         console.log('⚠️ Tipo de mensaje no soportado:', message.type);
         return null;
@@ -144,6 +281,8 @@ export function verifyWebhook(mode, token) {
 
 export default {
     sendWhatsAppMessage,
+    sendInteractiveList,
+    sendInteractiveButtons,
     markAsRead,
     extractMessageFromWebhook,
     verifyWebhook

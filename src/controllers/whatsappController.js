@@ -3,13 +3,22 @@
  * Controlador para manejar webhooks de WhatsApp Business API
  */
 
-import { sendWhatsAppMessage, markAsRead, extractMessageFromWebhook, verifyWebhook } from '../services/whatsappService.js';
+import { sendWhatsAppMessage, sendInteractiveList, sendInteractiveButtons, markAsRead, extractMessageFromWebhook, verifyWebhook } from '../services/whatsappService.js';
 import { parseIntent, generateNaturalResponse } from '../services/openaiService.js';
 import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import {
+    saveTransactionContext,
+    getTransactionById,
+    saveEditingContext,
+    getEditingContext,
+    saveDeletionContext,
+    getDeletionContext,
+    clearContext
+} from '../utils/contextManager.js';
 import { getTutorialMessage } from '../services/tutorialService.js';
 import { downloadWhatsAppMedia } from '../services/whatsappMediaService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
@@ -81,6 +90,14 @@ export async function receiveWebhook(req, res) {
             processImageMessage(phone, mediaId, messageId).catch(err => {
                 console.error('❌ Error procesando imagen de WhatsApp:', err);
             });
+        } else if (type === 'interactive_reply') {
+            const { replyId, replyTitle } = messageData;
+            console.log(`🔘 Respuesta interactiva de ${phone}: ${replyId} - ${replyTitle}`);
+
+            // Procesar respuesta interactiva de forma asíncrona
+            processInteractiveReply(phone, replyId, replyTitle).catch(err => {
+                console.error('❌ Error procesando respuesta interactiva:', err);
+            });
         }
 
         // Responder 200 inmediatamente a WhatsApp
@@ -101,6 +118,36 @@ async function processWhatsAppMessage(user_phone, message) {
         // Crear o obtener usuario (normaliza el número internamente)
         const user = await getOrCreateUser(user_phone);
         const normalizedPhone = user.phone; // Usar el teléfono normalizado de la BD
+
+        // Verificar si estamos en contexto de edición (esperando un monto)
+        const editingTransaction = getEditingContext(normalizedPhone);
+        if (editingTransaction) {
+            // Intentar parsear el mensaje como número
+            const newAmount = parseFloat(message.replace(/[^0-9.]/g, ''));
+
+            if (!isNaN(newAmount) && newAmount > 0) {
+                // Actualizar transacción
+                const oldAmount = editingTransaction.amount;
+                await updateTransaction(editingTransaction.id, normalizedPhone, {
+                    amount: newAmount
+                });
+
+                // Limpiar contexto
+                clearContext(normalizedPhone);
+
+                // Confirmar
+                await sendWhatsAppMessage(
+                    user_phone,
+                    `✅ Monto actualizado:\n\n${editingTransaction.description}\n💵 Antes: $${oldAmount}\n💰 Ahora: $${newAmount}`
+                );
+
+                console.log(`✏️ Transacción #${editingTransaction.id} actualizada: $${oldAmount} → $${newAmount}`);
+                return;
+            } else {
+                await sendWhatsAppMessage(user_phone, 'El monto no es válido. Intenta de nuevo o escribe "cancelar".');
+                return;
+            }
+        }
 
         // Parsear intent con OpenAI
         const intent = await parseIntent(message, normalizedPhone);
@@ -145,11 +192,14 @@ async function processWhatsAppMessage(user_phone, message) {
                 if (result.length === 0) {
                     response = 'No encontré transacciones con esos criterios. ¿Quieres registrar una? Puedes decirme algo como "gasté 500 en comida".';
                 } else {
-                    const lista = result.map((t, index) =>
-                        `${index + 1}. $${t.amount} - ${t.description} (${t.category_name}) - ${t.transaction_date}`
-                    ).join('\n');
+                    // Guardar contexto de transacciones para mensajes interactivos
+                    saveTransactionContext(normalizedPhone, result);
 
-                    response = `Encontré ${result.length} transacción${result.length > 1 ? 'es' : ''}:\n\n${lista}\n\nPuedes decir "elimina el 1" o "cambia el 2 a $600" para gestionar tus transacciones.`;
+                    // Enviar lista interactiva de WhatsApp
+                    await sendTransactionListInteractive(user_phone, normalizedPhone, result);
+
+                    // No establecer response, ya se envió la lista interactiva
+                    response = null;
                 }
                 break;
 
@@ -193,18 +243,18 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = 'No estoy seguro de cómo ayudarte con eso. ¿Podrías ser más específico?';
         }
 
-        // Guardar respuesta del asistente
-        await saveChatMessage({
-            user_phone: normalizedPhone, // Usar número normalizado
-            role: 'assistant',
-            message: response,
-            intent_json: null
-        });
+        // Guardar y enviar respuesta (si existe)
+        if (response) {
+            await saveChatMessage({
+                user_phone: normalizedPhone,
+                role: 'assistant',
+                message: response,
+                intent_json: null
+            });
 
-        // Enviar respuesta por WhatsApp (usar número original con código de país)
-        await sendWhatsAppMessage(user_phone, response);
-
-        console.log(`✅ Respuesta enviada a ${user_phone}`);
+            await sendWhatsAppMessage(user_phone, response);
+            console.log(`✅ Respuesta enviada a ${user_phone}`);
+        }
 
         // Si es usuario nuevo y fue un saludo, enviar tutorial de bienvenida
         if (user.isNewUser && intent.action === 'conversacion_general') {
@@ -535,6 +585,185 @@ function handleConversacionGeneral(params) {
 
         default:
             return '¿En qué puedo ayudarte hoy?';
+    }
+}
+
+/**
+ * Envía una lista interactiva de transacciones por WhatsApp
+ */
+async function sendTransactionListInteractive(user_phone, normalizedPhone, transactions) {
+    try {
+        // WhatsApp limita a 10 items por lista
+        const maxItems = 10;
+        const transactionsToShow = transactions.slice(0, maxItems);
+
+        // Formatear transacciones como rows de WhatsApp
+        const rows = transactionsToShow.map((t) => {
+            const emoji = t.type === 'expense' ? '💳' : '💰';
+            return {
+                id: `view_${t.id}`,
+                title: `$${t.amount} - ${t.description.substring(0, 20)}`,
+                description: `${emoji} ${t.category_name} - ${t.transaction_date}`
+            };
+        });
+
+        const sections = [
+            {
+                title: "Transacciones",
+                rows: rows
+            }
+        ];
+
+        const header = `📋 ${transactions.length} transacción${transactions.length > 1 ? 'es' : ''}`;
+        const body = `Encontré ${transactions.length} transacción${transactions.length > 1 ? 'es' : ''}. Selecciona una para ver opciones de editar o eliminar.`;
+        const buttonText = "Ver transacciones";
+
+        await sendInteractiveList(user_phone, header, body, buttonText, sections);
+
+        console.log(`📋 Lista interactiva enviada a ${user_phone} con ${rows.length} transacciones`);
+
+    } catch (error) {
+        console.error('❌ Error enviando lista interactiva:', error);
+        // Fallback a mensaje de texto
+        const lista = transactions.map((t, index) =>
+            `${index + 1}. $${t.amount} - ${t.description} (${t.category_name})`
+        ).join('\n');
+        await sendWhatsAppMessage(user_phone, `Encontré ${transactions.length} transacciones:\n\n${lista}`);
+    }
+}
+
+/**
+ * Procesa respuestas interactivas (clicks en botones o listas)
+ */
+async function processInteractiveReply(user_phone, replyId, replyTitle) {
+    try {
+        const user = await getOrCreateUser(user_phone);
+        const normalizedPhone = user.phone;
+
+        console.log(`🔘 Procesando respuesta interactiva: ${replyId}`);
+
+        // Parsear el replyId (formato: "action_transactionId")
+        const [action, transactionIdStr] = replyId.split('_');
+        const transactionId = parseInt(transactionIdStr, 10);
+
+        switch (action) {
+            case 'view':
+                // Usuario seleccionó una transacción, mostrar botones de editar/eliminar
+                const transaction = getTransactionById(normalizedPhone, transactionId);
+
+                if (!transaction) {
+                    await sendWhatsAppMessage(user_phone, 'Lo siento, no encontré esa transacción. El contexto puede haber expirado.');
+                    return;
+                }
+
+                // Enviar botones de acción
+                const buttons = [
+                    { id: `edit_${transactionId}`, title: '✏️ Editar' },
+                    { id: `delete_${transactionId}`, title: '🗑️ Eliminar' }
+                ];
+
+                const emoji = transaction.type === 'expense' ? '💳' : '💰';
+                const body = `${emoji} *$${transaction.amount}*\n${transaction.description}\n\n📁 ${transaction.category_name}\n📅 ${transaction.transaction_date}\n\n¿Qué quieres hacer?`;
+
+                await sendInteractiveButtons(user_phone, body, buttons);
+                break;
+
+            case 'edit':
+                // Usuario quiere editar, pedir nuevo monto
+                const transactionToEdit = getTransactionById(normalizedPhone, transactionId);
+
+                if (!transactionToEdit) {
+                    await sendWhatsAppMessage(user_phone, 'Lo siento, no encontré esa transacción.');
+                    return;
+                }
+
+                // Guardar contexto de edición
+                saveEditingContext(normalizedPhone, transactionToEdit);
+
+                await sendWhatsAppMessage(
+                    user_phone,
+                    `✏️ Editando: $${transactionToEdit.amount} - ${transactionToEdit.description}\n\n¿Cuál es el nuevo monto?`
+                );
+                break;
+
+            case 'delete':
+                // Usuario quiere eliminar, pedir confirmación
+                const transactionToDelete = getTransactionById(normalizedPhone, transactionId);
+
+                if (!transactionToDelete) {
+                    await sendWhatsAppMessage(user_phone, 'Lo siento, no encontré esa transacción.');
+                    return;
+                }
+
+                // Guardar contexto de eliminación
+                saveDeletionContext(normalizedPhone, transactionToDelete);
+
+                // Enviar botones de confirmación
+                const confirmButtons = [
+                    { id: `confirm_delete_${transactionId}`, title: '✅ Sí, eliminar' },
+                    { id: `cancel_delete_${transactionId}`, title: '❌ Cancelar' }
+                ];
+
+                await sendInteractiveButtons(
+                    user_phone,
+                    `🗑️ ¿Estás seguro de eliminar esta transacción?\n\n$${transactionToDelete.amount} - ${transactionToDelete.description}`,
+                    confirmButtons
+                );
+                break;
+
+            case 'confirm':
+                // Confirmación de eliminación
+                if (replyId.includes('delete')) {
+                    await processDeleteConfirmation(user_phone, normalizedPhone, transactionId);
+                }
+                break;
+
+            case 'cancel':
+                // Cancelar acción
+                clearContext(normalizedPhone);
+                await sendWhatsAppMessage(user_phone, '❌ Operación cancelada.');
+                break;
+
+            default:
+                console.log(`⚠️ Acción no reconocida: ${action}`);
+                await sendWhatsAppMessage(user_phone, 'No entendí esa acción. ¿Puedes intentarlo de nuevo?');
+        }
+
+    } catch (error) {
+        console.error('❌ Error procesando respuesta interactiva:', error);
+        await sendWhatsAppMessage(user_phone, 'Lo siento, hubo un error procesando tu selección.');
+    }
+}
+
+/**
+ * Procesa la confirmación de eliminación de una transacción
+ */
+async function processDeleteConfirmation(user_phone, normalizedPhone, transactionId) {
+    try {
+        const transaction = getDeletionContext(normalizedPhone);
+
+        if (!transaction || transaction.id !== transactionId) {
+            await sendWhatsAppMessage(user_phone, 'Lo siento, el contexto de eliminación expiró. Intenta listar las transacciones de nuevo.');
+            return;
+        }
+
+        // Eliminar transacción
+        await deleteTransaction(transaction.id, normalizedPhone);
+
+        // Limpiar contexto
+        clearContext(normalizedPhone);
+
+        // Confirmar
+        await sendWhatsAppMessage(
+            user_phone,
+            `✅ Transacción eliminada:\n\n$${transaction.amount} - ${transaction.description}\n${transaction.category_name}`
+        );
+
+        console.log(`🗑️ Transacción #${transaction.id} eliminada por ${normalizedPhone}`);
+
+    } catch (error) {
+        console.error('❌ Error eliminando transacción:', error);
+        await sendWhatsAppMessage(user_phone, 'Lo siento, hubo un error eliminando la transacción.');
     }
 }
 

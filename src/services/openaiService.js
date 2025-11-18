@@ -177,6 +177,57 @@ async function getOpenAIFunctions() {
             }
         },
         {
+            name: 'confirmar_receipt',
+            description: 'Confirma los datos de un ticket/recibo que está pendiente de confirmación. Usa esta función cuando el usuario responda afirmativamente a una solicitud de confirmación. Ejemplos: "sí", "correcto", "está bien", "ok", "confirmo", "confirma", "si", "exacto", "así es".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    confirmacion: {
+                        type: 'boolean',
+                        description: 'true para confirmar los datos del receipt'
+                    }
+                },
+                required: ['confirmacion']
+            }
+        },
+        {
+            name: 'corregir_receipt',
+            description: 'Corrige los datos de un ticket/recibo pendiente de confirmación. Usa esta cuando el usuario indique que los datos NO son correctos y proporcione correcciones. Ejemplos: "no, fueron 200", "no es correcto, el monto es 150", "no, pagué 350", "fueron 500 pesos", "el total fue de $180".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    monto_correcto: {
+                        type: 'number',
+                        description: 'El monto correcto proporcionado por el usuario'
+                    },
+                    descripcion_correcta: {
+                        type: 'string',
+                        description: 'Descripción correcta si el usuario la menciona'
+                    },
+                    categoria_correcta: {
+                        type: 'string',
+                        description: 'Categoría correcta si el usuario la menciona',
+                        enum: categories.map(c => c.name)
+                    }
+                },
+                required: ['monto_correcto']
+            }
+        },
+        {
+            name: 'proporcionar_monto',
+            description: 'Proporciona el monto faltante de un recibo. Usa esta cuando se le pidió al usuario que proporcione el monto porque no se pudo leer del ticket, y el usuario responde solo con un número o cantidad. Ejemplos: "150", "200 pesos", "fueron 350", "$180", "500".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    monto: {
+                        type: 'number',
+                        description: 'El monto proporcionado por el usuario'
+                    }
+                },
+                required: ['monto']
+            }
+        },
+        {
             name: 'conversacion_general',
             description: 'Para saludos, agradecimientos, despedidas o conversación casual que no requiere acción específica',
             parameters: {
@@ -305,6 +356,13 @@ AYUDA / INSTRUCCIONES:
 - "¿qué puedes hacer?" → ayuda_uso (tipo_ayuda: general)
 - "¿cómo consulto mi estado?" → ayuda_uso (tipo_ayuda: consultar)
 - "¿cómo funciona esto?" → ayuda_uso (tipo_ayuda: general)
+
+CONFIRMACIONES DE RECEIPTS (cuando hay un receipt pendiente de confirmación):
+- "sí", "correcto", "está bien", "ok", "confirmo" → confirmar_receipt (confirmacion: true)
+- "no, fueron 200", "no es correcto, el monto es 150" → corregir_receipt (monto_correcto: 200 o 150)
+- "150", "200 pesos", "$350" (cuando se pidió el monto) → proporcionar_monto (monto: 150, 200, o 350)
+
+IMPORTANTE: Solo usa confirmar_receipt, corregir_receipt o proporcionar_monto cuando el contexto indica que hay un receipt pendiente de confirmación o que se solicitó información.
 
 Sé inteligente al categorizar. Si el usuario dice "tacos", "pizza", "restaurante" → categoría Comida.
 Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;

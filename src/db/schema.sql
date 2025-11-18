@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS receipt_images (
     status VARCHAR(20) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
-    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id) ON DELETE SET NULL
 );
 
 -- Índices para búsquedas de receipts

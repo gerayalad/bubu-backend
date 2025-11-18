@@ -8,7 +8,7 @@ import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage, getChatHistory } from '../services/chatService.js';
-import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import { saveTransactionList, getTransactionByNumber, getPendingReceipt, savePendingReceipt, clearPendingReceipt } from '../services/contextService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
 import { saveReceiptImage } from '../services/receiptService.js';
 
@@ -75,11 +75,30 @@ export async function processMessage(req, res) {
                 if (result.length === 0) {
                     response = 'No encontré transacciones con esos criterios. ¿Quieres registrar una? Puedes decirme algo como "gasté 500 en comida".';
                 } else {
-                    const lista = result.map((t, index) =>
-                        `${index + 1}. $${t.amount} - ${t.description} (${t.category_name}) - ${t.transaction_date}`
-                    ).join('\n');
+                    // Formato estructurado para mensajes interactivos (WhatsApp + Web)
+                    const transactionsFormatted = result.map((t, index) => ({
+                        id: t.id,
+                        number: index + 1,
+                        amount: t.amount,
+                        description: t.description,
+                        category: t.category_name,
+                        type: t.type,
+                        date: t.transaction_date,
+                        displayText: `$${t.amount} - ${t.description}`,
+                        emoji: t.type === 'expense' ? '💳' : '💰'
+                    }));
 
-                    response = `Encontré ${result.length} transacción${result.length > 1 ? 'es' : ''}:\n\n${lista}\n\nPuedes decir "elimina el 1" o "cambia el 2 a $600" para gestionar tus transacciones.`;
+                    // Respuesta con metadata para renderizado interactivo
+                    response = {
+                        type: 'interactive_list',
+                        messageType: 'transaction_list',
+                        header: `📋 ${result.length} transacción${result.length > 1 ? 'es' : ''}`,
+                        body: `Encontré ${result.length} transacción${result.length > 1 ? 'es' : ''} de ${intent.parameters.tipo || 'todos los tipos'}${intent.parameters.categoria ? ` en ${intent.parameters.categoria}` : ''}:`,
+                        transactions: transactionsFormatted,
+                        actions: ['edit', 'delete'],
+                        // Formato texto plano para fallback
+                        plainText: `Encontré ${result.length} transacción${result.length > 1 ? 'es' : ''}:\n\n${result.map((t, i) => `${i + 1}. $${t.amount} - ${t.description} (${t.category_name})`).join('\n')}\n\n✏️ Para editar o 🗑️ eliminar, usa los botones interactivos.`
+                    };
                 }
                 break;
 
@@ -118,24 +137,44 @@ export async function processMessage(req, res) {
                 response = handleConversacionGeneral(intent.parameters);
                 break;
 
+            case 'confirmar_receipt':
+                result = await handleConfirmarReceipt(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'corregir_receipt':
+                result = await handleCorregirReceipt(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'proporcionar_monto':
+                result = await handleProporcionarMonto(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
             default:
                 result = null;
                 response = 'No estoy seguro de cómo ayudarte con eso. ¿Podrías ser más específico?';
         }
 
         // Guardar respuesta del asistente
+        // Si es un mensaje interactivo, guardar el plainText para historial
+        const messageToSave = typeof response === 'object' && response.plainText
+            ? response.plainText
+            : response;
+
         await saveChatMessage({
             user_phone: user.phone,
             role: 'assistant',
-            message: response,
-            intent_json: null
+            message: messageToSave,
+            intent_json: typeof response === 'object' ? response : null
         });
 
         return res.json({
             success: true,
             data: {
                 intent: intent.action,
-                response,
+                response, // Devolver el objeto completo para renderizado interactivo
                 result
             }
         });
@@ -501,6 +540,192 @@ function handleConversacionGeneral(params) {
 }
 
 /**
+ * Maneja la confirmación de un receipt pendiente
+ */
+async function handleConfirmarReceipt(user_phone, params) {
+    // Obtener el receipt pendiente del contexto
+    const pendingReceipt = getPendingReceipt(user_phone);
+
+    if (!pendingReceipt) {
+        return {
+            response: '🤔 No tengo ningún ticket pendiente de confirmación. ¿Puedes enviar la imagen nuevamente?'
+        };
+    }
+
+    const { ocrData } = pendingReceipt;
+
+    // Buscar la categoría
+    const category = await getCategoryByName(ocrData.category);
+
+    if (!category) {
+        clearPendingReceipt(user_phone);
+        return {
+            response: `No encontré la categoría "${ocrData.category}". Por favor, envía el ticket nuevamente.`
+        };
+    }
+
+    // Crear la transacción
+    const transaction = await createTransaction({
+        user_phone,
+        category_id: category.id,
+        type: 'expense',
+        amount: ocrData.amount,
+        description: ocrData.description || `Compra en ${ocrData.merchant}`,
+        transaction_date: ocrData.date || new Date().toISOString().split('T')[0]
+    });
+
+    // Actualizar receipt en BD
+    if (pendingReceipt.receiptId) {
+        await saveReceiptImage({
+            user_phone,
+            whatsapp_media_id: null,
+            media_url: null,
+            ocr_result: ocrData,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+    }
+
+    // Limpiar contexto
+    clearPendingReceipt(user_phone);
+
+    return {
+        transaction,
+        response: `✅ ¡Perfecto! Registré el gasto de $${ocrData.amount} en ${ocrData.category} 📸`
+    };
+}
+
+/**
+ * Maneja la corrección de un receipt pendiente
+ */
+async function handleCorregirReceipt(user_phone, params) {
+    const { monto_correcto, descripcion_correcta, categoria_correcta } = params;
+
+    // Obtener el receipt pendiente del contexto
+    const pendingReceipt = getPendingReceipt(user_phone);
+
+    if (!pendingReceipt) {
+        return {
+            response: '🤔 No tengo ningún ticket pendiente de corrección. ¿Puedes enviar la imagen nuevamente?'
+        };
+    }
+
+    const { ocrData } = pendingReceipt;
+
+    // Aplicar correcciones
+    const correctedData = {
+        ...ocrData,
+        amount: monto_correcto || ocrData.amount,
+        description: descripcion_correcta || ocrData.description,
+        category: categoria_correcta || ocrData.category
+    };
+
+    // Buscar la categoría
+    const category = await getCategoryByName(correctedData.category);
+
+    if (!category) {
+        clearPendingReceipt(user_phone);
+        return {
+            response: `No encontré la categoría "${correctedData.category}". Por favor, especifica una categoría válida.`
+        };
+    }
+
+    // Crear la transacción con datos corregidos
+    const transaction = await createTransaction({
+        user_phone,
+        category_id: category.id,
+        type: 'expense',
+        amount: correctedData.amount,
+        description: correctedData.description || `Compra en ${correctedData.merchant}`,
+        transaction_date: correctedData.date || new Date().toISOString().split('T')[0]
+    });
+
+    // Actualizar receipt en BD
+    if (pendingReceipt.receiptId) {
+        await saveReceiptImage({
+            user_phone,
+            whatsapp_media_id: null,
+            media_url: null,
+            ocr_result: correctedData,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+    }
+
+    // Limpiar contexto
+    clearPendingReceipt(user_phone);
+
+    return {
+        transaction,
+        response: `✅ ¡Corregido! Registré el gasto de $${correctedData.amount} en ${correctedData.category} 📝`
+    };
+}
+
+/**
+ * Maneja la provisión de un monto faltante para un receipt
+ */
+async function handleProporcionarMonto(user_phone, params) {
+    const { monto } = params;
+
+    // Obtener el receipt pendiente del contexto
+    const pendingReceipt = getPendingReceipt(user_phone);
+
+    if (!pendingReceipt) {
+        return {
+            response: '🤔 No tengo ningún ticket pendiente. ¿Puedes enviar la imagen nuevamente?'
+        };
+    }
+
+    const { ocrData } = pendingReceipt;
+
+    // Agregar el monto proporcionado
+    const completeData = {
+        ...ocrData,
+        amount: monto
+    };
+
+    // Buscar la categoría
+    const category = await getCategoryByName(completeData.category);
+
+    if (!category) {
+        clearPendingReceipt(user_phone);
+        return {
+            response: `No encontré la categoría "${completeData.category}". Por favor, envía el ticket nuevamente.`
+        };
+    }
+
+    // Crear la transacción
+    const transaction = await createTransaction({
+        user_phone,
+        category_id: category.id,
+        type: 'expense',
+        amount: completeData.amount,
+        description: completeData.description || `Compra en ${completeData.merchant}`,
+        transaction_date: completeData.date || new Date().toISOString().split('T')[0]
+    });
+
+    // Actualizar receipt en BD
+    if (pendingReceipt.receiptId) {
+        await saveReceiptImage({
+            user_phone,
+            whatsapp_media_id: null,
+            media_url: null,
+            ocr_result: completeData,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+    }
+
+    // Limpiar contexto
+    clearPendingReceipt(user_phone);
+
+    return {
+        transaction,
+        response: `✅ ¡Listo! Registré el gasto de $${monto} en ${completeData.category} 📸`
+    };
+}
+
+/**
  * Obtiene el historial de chat de un usuario
  */
 export async function getHistory(req, res) {
@@ -572,13 +797,20 @@ export async function processImageMessage(req, res) {
         if (!validation.isValid && validation.missingFields.includes('amount')) {
             const response = '🤔 Vi el ticket pero no pude leer el monto claramente. ¿Me lo puedes decir? Por ejemplo: "500"';
 
-            await saveReceiptImage({
+            const receiptRecord = await saveReceiptImage({
                 user_phone: normalizedPhone,
                 whatsapp_media_id: null,
                 media_url: null,
                 ocr_result: data,
                 transaction_id: null,
                 status: 'pending'
+            });
+
+            // Guardar en contexto para poder completar después
+            savePendingReceipt(normalizedPhone, {
+                ocrData: data,
+                receiptId: receiptRecord.id,
+                status: 'needs_amount'
             });
 
             await saveChatMessage({
@@ -603,13 +835,20 @@ export async function processImageMessage(req, res) {
         if (validation.needsConfirmation) {
             const response = `Vi un gasto de $${data.amount} en ${data.category}.\n\n¿Es correcto? Puedes responder "sí" o corregirme.`;
 
-            await saveReceiptImage({
+            const receiptRecord = await saveReceiptImage({
                 user_phone: normalizedPhone,
                 whatsapp_media_id: null,
                 media_url: null,
                 ocr_result: data,
                 transaction_id: null,
                 status: 'pending_confirmation'
+            });
+
+            // Guardar en contexto para poder confirmar/corregir después
+            savePendingReceipt(normalizedPhone, {
+                ocrData: data,
+                receiptId: receiptRecord.id,
+                status: 'needs_confirmation'
             });
 
             await saveChatMessage({
