@@ -656,8 +656,11 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
 
         console.log(`🔘 Procesando respuesta interactiva: ${replyId}`);
 
-        // Parsear el replyId (formato: "action_transactionId")
-        const [action, transactionIdStr] = replyId.split('_');
+        // Parsear el replyId (formato: "action_transactionId" o "action_subaction_transactionId")
+        // El ID siempre es la última parte después de split('_')
+        const parts = replyId.split('_');
+        const action = parts[0];
+        const transactionIdStr = parts[parts.length - 1];  // Última parte es el ID
         const transactionId = parseInt(transactionIdStr, 10);
 
         switch (action) {
