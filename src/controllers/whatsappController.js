@@ -600,9 +600,17 @@ async function sendTransactionListInteractive(user_phone, normalizedPhone, trans
         // Formatear transacciones como rows de WhatsApp
         const rows = transactionsToShow.map((t) => {
             const emoji = t.type === 'expense' ? '💳' : '💰';
+
+            // WhatsApp requiere max 24 caracteres en el título
+            const amountStr = `$${t.amount}`;
+            const maxTitleLength = 24;
+            const availableForDesc = maxTitleLength - amountStr.length - 3; // -3 for " - "
+            const truncatedDesc = t.description.substring(0, Math.max(0, availableForDesc));
+            const title = `${amountStr} - ${truncatedDesc}`.substring(0, maxTitleLength);
+
             return {
                 id: `view_${t.id}`,
-                title: `$${t.amount} - ${t.description.substring(0, 20)}`,
+                title: title,
                 description: `${emoji} ${t.category_name} - ${t.transaction_date}`
             };
         });
