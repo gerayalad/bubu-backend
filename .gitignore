@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables (NO subir a GitHub)
+.env
+.env.local
+.env.*.local
+
+# Database files (SQLite - se creará automáticamente en Railway)
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+database.sqlite*
+
+# Logs
+logs/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+coverage/
+.nyc_output/
+
+# Build
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/
