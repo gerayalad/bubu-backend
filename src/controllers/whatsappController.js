@@ -677,7 +677,12 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
                 ];
 
                 const emoji = transaction.type === 'expense' ? '💳' : '💰';
-                const body = `${emoji} *$${transaction.amount}*\n${transaction.description}\n\n📁 ${transaction.category_name}\n📅 ${transaction.transaction_date}\n\n¿Qué quieres hacer?`;
+
+                // Formatear fecha como DD/MM
+                const date = new Date(transaction.transaction_date);
+                const formattedDate = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+                const body = `${emoji} *$${transaction.amount}*\n${transaction.description}\n\n📁 ${transaction.category_name}\n📅 ${formattedDate}\n\n¿Qué quieres hacer?`;
 
                 await sendInteractiveButtons(user_phone, body, buttons);
                 break;
