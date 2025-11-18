@@ -22,13 +22,27 @@ const PORT = process.env.PORT || 3001;
 
 // CORS - permitir peticiones desde el frontend
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: (origin, callback) => {
+        // Permitir localhost en cualquier puerto en desarrollo
+        const allowedOrigins = [
+            'http://localhost:5173',
+            'http://localhost:5174',
+            process.env.FRONTEND_URL
+        ].filter(Boolean);
+
+        // Si no hay origen (como en Postman) o está en la lista, permitir
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true
 }));
 
-// Body parser
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+// Body parser - aumentar límite para permitir imágenes en base64
+app.use(bodyParser.json({ limit: '10mb' }));
+app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
 
 // Logger simple
 app.use((req, res, next) => {

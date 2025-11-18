@@ -9,6 +9,8 @@ import { createTransaction, getFinancialSummary, getUserTransactions, deleteTran
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage, getChatHistory } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
+import { saveReceiptImage } from '../services/receiptService.js';
 
 /**
  * Procesa un mensaje del usuario
@@ -522,7 +524,176 @@ export async function getHistory(req, res) {
     }
 }
 
+/**
+ * Procesa una imagen del webchat (OCR de tickets)
+ */
+export async function processImageMessage(req, res) {
+    try {
+        const { user_phone, image_base64, mime_type } = req.body;
+
+        if (!user_phone || !image_base64) {
+            return res.status(400).json({
+                success: false,
+                error: 'user_phone e image_base64 son requeridos'
+            });
+        }
+
+        // Crear o obtener usuario
+        const user = await getOrCreateUser(user_phone);
+        const normalizedPhone = user.phone;
+
+        console.log(`📸 Procesando imagen del usuario ${normalizedPhone}...`);
+
+        // Extraer datos con OCR
+        const ocrResult = await extractReceiptData(image_base64, mime_type || 'image/jpeg');
+
+        if (!ocrResult.success) {
+            return res.json({
+                success: true,
+                data: {
+                    response: '😕 No pude leer el ticket claramente. Intenta con una imagen más nítida o escribe los datos manualmente.',
+                    ocr_success: false
+                }
+            });
+        }
+
+        const { data } = ocrResult;
+        const validation = validateReceiptData(data);
+
+        // Guardar mensaje del usuario (imagen)
+        await saveChatMessage({
+            user_phone: normalizedPhone,
+            role: 'user',
+            message: '📸 [Imagen de ticket enviada]',
+            intent_json: { action: 'ocr_receipt', ocr_data: data }
+        });
+
+        // Si falta el monto
+        if (!validation.isValid && validation.missingFields.includes('amount')) {
+            const response = '🤔 Vi el ticket pero no pude leer el monto claramente. ¿Me lo puedes decir? Por ejemplo: "500"';
+
+            await saveReceiptImage({
+                user_phone: normalizedPhone,
+                whatsapp_media_id: null,
+                media_url: null,
+                ocr_result: data,
+                transaction_id: null,
+                status: 'pending'
+            });
+
+            await saveChatMessage({
+                user_phone: normalizedPhone,
+                role: 'assistant',
+                message: response,
+                intent_json: null
+            });
+
+            return res.json({
+                success: true,
+                data: {
+                    response,
+                    ocr_success: true,
+                    ocr_data: data,
+                    needs_amount: true
+                }
+            });
+        }
+
+        // Si la confianza es baja (< 70%)
+        if (validation.needsConfirmation) {
+            const response = `Vi un gasto de $${data.amount} en ${data.category}.\n\n¿Es correcto? Puedes responder "sí" o corregirme.`;
+
+            await saveReceiptImage({
+                user_phone: normalizedPhone,
+                whatsapp_media_id: null,
+                media_url: null,
+                ocr_result: data,
+                transaction_id: null,
+                status: 'pending_confirmation'
+            });
+
+            await saveChatMessage({
+                user_phone: normalizedPhone,
+                role: 'assistant',
+                message: response,
+                intent_json: null
+            });
+
+            return res.json({
+                success: true,
+                data: {
+                    response,
+                    ocr_success: true,
+                    ocr_data: data,
+                    needs_confirmation: true
+                }
+            });
+        }
+
+        // Alta confianza: crear transacción automáticamente
+        const category = await getCategoryByName(data.category);
+
+        if (!category) {
+            return res.json({
+                success: true,
+                data: {
+                    response: `No encontré la categoría "${data.category}". ¿Puedes especificar una categoría válida?`,
+                    ocr_success: true,
+                    ocr_data: data,
+                    needs_category: true
+                }
+            });
+        }
+
+        const transaction = await createTransaction({
+            user_phone: normalizedPhone,
+            category_id: category.id,
+            type: 'expense',
+            amount: data.amount,
+            description: data.description || `Compra en ${data.merchant}`,
+            transaction_date: data.date || new Date().toISOString().split('T')[0]
+        });
+
+        await saveReceiptImage({
+            user_phone: normalizedPhone,
+            whatsapp_media_id: null,
+            media_url: null,
+            ocr_result: data,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+
+        const response = `✅ ¡Listo! Registré un gasto de $${data.amount} en ${data.category} 📸\n\n"${transaction.description}"`;
+
+        await saveChatMessage({
+            user_phone: normalizedPhone,
+            role: 'assistant',
+            message: response,
+            intent_json: null
+        });
+
+        return res.json({
+            success: true,
+            data: {
+                response,
+                ocr_success: true,
+                ocr_data: data,
+                transaction,
+                auto_created: true
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error procesando imagen:', error);
+        return res.status(500).json({
+            success: false,
+            error: error.message || 'Error al procesar la imagen'
+        });
+    }
+}
+
 export default {
     processMessage,
-    getHistory
+    getHistory,
+    processImageMessage
 };

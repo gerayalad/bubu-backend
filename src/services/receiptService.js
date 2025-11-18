@@ -36,18 +36,14 @@ export async function saveReceiptImage(data) {
                 user_phone,
                 whatsapp_media_id || null,
                 media_url || null,
-                ocr_result ? JSON.stringify(ocr_result) : null,
+                ocr_result || null,  // PostgreSQL JSONB maneja el JSON automáticamente
                 transaction_id || null,
                 status || 'pending'
             ]
         );
 
         const saved = result.rows[0];
-
-        // Parsear ocr_result de vuelta a objeto
-        if (saved.ocr_result) {
-            saved.ocr_result = JSON.parse(saved.ocr_result);
-        }
+        // PostgreSQL JSONB ya devuelve el objeto parseado, no necesitamos JSON.parse
 
         console.log(`✅ Receipt guardado con ID: ${saved.id}`);
         return saved;
@@ -70,10 +66,7 @@ export async function getReceiptByMediaId(mediaId) {
             [mediaId]
         );
 
-        if (receipt && receipt.ocr_result) {
-            receipt.ocr_result = JSON.parse(receipt.ocr_result);
-        }
-
+        // PostgreSQL JSONB ya devuelve el objeto parseado
         return receipt;
 
     } catch (error) {
@@ -98,13 +91,8 @@ export async function getUserReceipts(userPhone, limit = 10) {
             [userPhone, limit]
         );
 
-        // Parsear ocr_result de cada receipt
-        return receipts.map(receipt => {
-            if (receipt.ocr_result) {
-                receipt.ocr_result = JSON.parse(receipt.ocr_result);
-            }
-            return receipt;
-        });
+        // PostgreSQL JSONB ya devuelve los objetos parseados
+        return receipts;
 
     } catch (error) {
         console.error('❌ Error obteniendo receipts del usuario:', error);
@@ -130,10 +118,7 @@ export async function updateReceiptStatus(receiptId, status, transactionId = nul
         );
 
         const updated = result.rows[0];
-
-        if (updated && updated.ocr_result) {
-            updated.ocr_result = JSON.parse(updated.ocr_result);
-        }
+        // PostgreSQL JSONB ya devuelve el objeto parseado
 
         console.log(`✅ Receipt ${receiptId} actualizado a estado: ${status}`);
         return updated;
