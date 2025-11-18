@@ -17,7 +17,7 @@ async function getOpenAIFunctions() {
     return [
         {
             name: 'registrar_transaccion',
-            description: 'DEPRECADO - Usa confirmar_transaccion en su lugar. Esta función solo debe usarse si el usuario explícitamente pide registrar sin confirmación.',
+            description: 'Registra un gasto o ingreso del usuario DIRECTAMENTE (sin confirmación). Usa esta función cuando el usuario mencione que gastó dinero, pagó algo, recibió dinero, le pagaron, etc. IMPORTANTE: Usa confirmar_transaccion para webchat con confirmación.',
             parameters: {
                 type: 'object',
                 properties: {
