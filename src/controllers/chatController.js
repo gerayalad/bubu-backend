@@ -19,12 +19,12 @@ import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
  */
 export async function processMessage(req, res) {
     try {
-        const { user_phone, message } = req.body;
+        const { user_phone, message, button_id } = req.body;
 
-        if (!user_phone || !message) {
+        if (!user_phone || (!message && !button_id)) {
             return res.status(400).json({
                 success: false,
-                error: 'user_phone y message son requeridos'
+                error: 'user_phone y (message o button_id) son requeridos'
             });
         }
 
@@ -34,23 +34,25 @@ export async function processMessage(req, res) {
         // DETECCIÓN TEMPRANA: Verificar si hay una transacción pendiente de confirmación
         const pendingTx = getPendingTransaction(user_phone);
         if (pendingTx) {
-            const lowerMsg = message.toLowerCase().trim();
+            const lowerMsg = message ? message.toLowerCase().trim() : '';
 
-            // Detectar confirmación afirmativa
-            const affirmativeWords = ['sí', 'si', 'ok', 'confirmo', 'confirma', 'está bien', 'correcto', 'exacto', 'dale', 'va'];
-            const isAffirmative = affirmativeWords.some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
+            // Detectar confirmación por botón o texto
+            const isAffirmative = button_id === 'confirm_pending' ||
+                                ['sí', 'si', 'ok', 'confirmo', 'confirma', 'está bien', 'correcto', 'exacto', 'dale', 'va']
+                                .some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
 
-            // Detectar cancelación
-            const cancelWords = ['no', 'cancelar', 'cancela', 'borrar', 'borra', 'descartar'];
-            const isCancel = cancelWords.some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
+            // Detectar cancelación por botón o texto
+            const isCancel = button_id === 'cancel_pending' ||
+                           ['no', 'cancelar', 'cancela', 'borrar', 'borra', 'descartar']
+                           .some(word => lowerMsg === word || lowerMsg.startsWith(word + ' '));
 
             if (isAffirmative) {
                 // Guardar mensaje del usuario
                 await saveChatMessage({
                     user_phone: user.phone,
                     role: 'user',
-                    message,
-                    intent_json: { action: 'confirmar_transaccion_pendiente' }
+                    message: button_id ? '✅ Confirmar' : message,
+                    intent_json: { action: 'confirmar_transaccion_pendiente', button_id }
                 });
 
                 // Crear la transacción en la base de datos
@@ -95,8 +97,8 @@ export async function processMessage(req, res) {
                 await saveChatMessage({
                     user_phone: user.phone,
                     role: 'user',
-                    message,
-                    intent_json: { action: 'cancelar_transaccion_pendiente' }
+                    message: button_id ? '❌ Cancelar' : message,
+                    intent_json: { action: 'cancelar_transaccion_pendiente', button_id }
                 });
 
                 const response = '❌ Transacción cancelada. ¿Hay algo más en lo que pueda ayudarte?';
@@ -1082,16 +1084,26 @@ async function handleConfirmarTransaccion(user_phone, params) {
     const emoji = type === 'expense' ? '💳' : '💰';
     const tipoText = type === 'expense' ? 'Gasto' : 'Ingreso';
 
-    // Generar respuesta de confirmación
-    const response = `📝 ¿Confirmas esta transacción?
+    // Generar respuesta de confirmación con botones interactivos
+    const body = `📝 ¿Confirmas esta transacción?
 
 ${emoji} **$${monto.toFixed(2)}**
 📁 ${category.name}
 📝 ${descripcion}
 📅 ${displayDate}
-${tipoText}
+${tipoText}`;
 
-Responde "sí" para confirmar, "cancelar" para descartar, o "cambiar [campo]" para modificar.`;
+    const response = {
+        type: 'interactive_buttons',
+        messageType: 'transaction_confirmation',
+        body,
+        buttons: [
+            { id: 'confirm_pending', title: '✅ Confirmar' },
+            { id: 'cancel_pending', title: '❌ Cancelar' }
+        ],
+        pendingTransaction: pendingData,
+        plainText: `${body}\n\nResponde "sí" para confirmar o "cancelar" para descartar.`
+    };
 
     return {
         response
