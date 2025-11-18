@@ -7,7 +7,7 @@ import { sendWhatsAppMessage, markAsRead, extractMessageFromWebhook, verifyWebho
 import { parseIntent, generateNaturalResponse } from '../services/openaiService.js';
 import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
-import { getCategoryByName, suggestCategory } from '../services/categoryService.js';
+import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
 import { getTutorialMessage } from '../services/tutorialService.js';
@@ -155,6 +155,16 @@ async function processWhatsAppMessage(user_phone, message) {
                     userMessage: message,
                     userPhone: normalizedPhone
                 });
+                break;
+
+            case 'consultar_categorias':
+                result = handleConsultarCategorias(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'ayuda_uso':
+                result = null;
+                response = handleAyudaUso(intent.parameters);
                 break;
 
             case 'conversacion_general':
@@ -384,6 +394,114 @@ async function handleEditarTransaccion(user_phone, params) {
         oldAmount: oldAmount,
         newAmount: nuevo_monto
     };
+}
+
+/**
+ * Maneja consulta de categorías disponibles
+ */
+function handleConsultarCategorias(params) {
+    const { tipo_categoria = 'todas' } = params;
+    const categories = getAllCategories();
+
+    let filteredCategories;
+    let tipoTexto;
+
+    if (tipo_categoria === 'gasto') {
+        filteredCategories = categories.filter(c => c.type === 'expense');
+        tipoTexto = 'gastos';
+    } else if (tipo_categoria === 'ingreso') {
+        filteredCategories = categories.filter(c => c.type === 'income');
+        tipoTexto = 'ingresos';
+    } else {
+        filteredCategories = categories;
+        tipoTexto = 'disponibles';
+    }
+
+    const expenseCategories = filteredCategories
+        .filter(c => c.type === 'expense')
+        .map(c => `${c.icon} ${c.name}`)
+        .join(', ');
+
+    const incomeCategories = filteredCategories
+        .filter(c => c.type === 'income')
+        .map(c => `${c.icon} ${c.name}`)
+        .join(', ');
+
+    let response = `Estas son las categorías ${tipoTexto}:\n\n`;
+
+    if (tipo_categoria === 'todas' || tipo_categoria === 'gasto') {
+        response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
+    }
+
+    if (tipo_categoria === 'todas' || tipo_categoria === 'ingreso') {
+        response += `💰 *INGRESOS:*\n${incomeCategories}\n\n`;
+    }
+
+    response += 'Puedes usarlas para registrar tus transacciones. Ejemplo: "gasté 500 en comida" 💳';
+
+    return {
+        categories: filteredCategories,
+        response
+    };
+}
+
+/**
+ * Maneja solicitudes de ayuda e instrucciones de uso
+ */
+function handleAyudaUso(params) {
+    const { tipo_ayuda = 'general' } = params;
+
+    switch (tipo_ayuda) {
+        case 'registrar':
+            return `Para registrar una transacción, dime el monto, descripción y categoría. Ejemplos:
+
+📊 *GASTOS:*
+• "Gasté 350 en tacos"
+• "Pagué 1200 de luz"
+• "Ayer compré ropa por 800"
+
+💰 *INGRESOS:*
+• "Me pagaron 15000 de nómina"
+• "Vendí algo por 3500"
+
+Puedo detectar la categoría automáticamente. ¿Qué quieres registrar?`;
+
+        case 'consultar':
+            return `Puedo mostrarte tu estado financiero de diferentes periodos:
+
+📈 *CONSULTAS:*
+• "¿Cómo voy este mes?"
+• "¿Cuánto he gastado?"
+• "Gastos del mes pasado"
+• "¿Qué gastos tengo en comida?"
+
+También puedes ver listas detalladas:
+• "Muestra mis gastos en comida"
+• "Ver mis servicios"
+
+¿Qué quieres consultar?`;
+
+        default:
+            return `¡Hola! Soy BUBU, tu asistente de finanzas personales 💰
+
+Puedo ayudarte a:
+
+📊 *REGISTRAR:* Gastos e ingresos
+• "Gasté 500 en tacos"
+• "Me llegó la nómina de 15000"
+
+📈 *CONSULTAR:* Tu estado financiero
+• "¿Cómo voy este mes?"
+• "Muestra mis gastos en comida"
+
+✏️ *GESTIONAR:* Editar o eliminar
+• "Elimina el 1"
+• "Cambia el 2 a $600"
+
+💡 Di "qué categorías existen" para ver todas las opciones.
+
+¿En qué te ayudo?`;
+    }
 }
 
 function handleConversacionGeneral(params) {
