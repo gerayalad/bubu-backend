@@ -81,15 +81,16 @@ export async function receiveWebhook(req, res) {
  */
 async function processWhatsAppMessage(user_phone, message) {
     try {
-        // Crear o obtener usuario
+        // Crear o obtener usuario (normaliza el número internamente)
         const user = getOrCreateUser(user_phone);
+        const normalizedPhone = user.phone; // Usar el teléfono normalizado de la BD
 
         // Parsear intent con OpenAI
-        const intent = await parseIntent(message, user_phone);
+        const intent = await parseIntent(message, normalizedPhone);
 
         // Guardar mensaje del usuario
         saveChatMessage({
-            user_phone,
+            user_phone: normalizedPhone, // Usar número normalizado
             role: 'user',
             message,
             intent_json: intent
@@ -101,7 +102,7 @@ async function processWhatsAppMessage(user_phone, message) {
 
         switch (intent.action) {
             case 'registrar_transaccion':
-                result = await handleRegistrarTransaccion(user_phone, intent.parameters);
+                result = await handleRegistrarTransaccion(normalizedPhone, intent.parameters);
                 response = await generateNaturalResponse({
                     action: 'registrar_transaccion',
                     result,
@@ -110,7 +111,7 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'consultar_estado':
-                result = await handleConsultarEstado(user_phone, intent.parameters);
+                result = await handleConsultarEstado(normalizedPhone, intent.parameters);
                 response = await generateNaturalResponse({
                     action: 'consultar_estado',
                     result,
@@ -119,8 +120,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'listar_transacciones':
-                result = await handleListarTransacciones(user_phone, intent.parameters);
-                saveTransactionList(user_phone, result);
+                result = await handleListarTransacciones(normalizedPhone, intent.parameters);
+                saveTransactionList(normalizedPhone, result);
 
                 if (result.length === 0) {
                     response = 'No encontré transacciones con esos criterios. ¿Quieres registrar una? Puedes decirme algo como "gasté 500 en comida".';
@@ -134,7 +135,7 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'eliminar_transaccion':
-                result = await handleEliminarTransaccion(user_phone, intent.parameters);
+                result = await handleEliminarTransaccion(normalizedPhone, intent.parameters);
                 response = await generateNaturalResponse({
                     action: 'eliminar_transaccion',
                     result,
@@ -143,7 +144,7 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'editar_transaccion':
-                result = await handleEditarTransaccion(user_phone, intent.parameters);
+                result = await handleEditarTransaccion(normalizedPhone, intent.parameters);
                 response = await generateNaturalResponse({
                     action: 'editar_transaccion',
                     result,
@@ -163,13 +164,13 @@ async function processWhatsAppMessage(user_phone, message) {
 
         // Guardar respuesta del asistente
         saveChatMessage({
-            user_phone,
+            user_phone: normalizedPhone, // Usar número normalizado
             role: 'assistant',
             message: response,
             intent_json: null
         });
 
-        // Enviar respuesta por WhatsApp
+        // Enviar respuesta por WhatsApp (usar número original con código de país)
         await sendWhatsAppMessage(user_phone, response);
 
         console.log(`✅ Respuesta enviada a ${user_phone}`);
