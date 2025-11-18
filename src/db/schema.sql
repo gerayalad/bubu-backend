@@ -67,6 +67,25 @@ CREATE TABLE IF NOT EXISTS chat_messages (
 -- Índice para historial de mensajes
 CREATE INDEX IF NOT EXISTS idx_chat_user ON chat_messages(user_phone, created_at DESC);
 
+-- Tabla de imágenes de tickets (OCR)
+-- Almacena metadata de tickets procesados por OCR
+CREATE TABLE IF NOT EXISTS receipt_images (
+    id SERIAL PRIMARY KEY,
+    user_phone VARCHAR(10) NOT NULL,
+    whatsapp_media_id VARCHAR(255),
+    media_url TEXT,
+    ocr_result JSONB,
+    transaction_id INTEGER,
+    status VARCHAR(20) DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_phone) REFERENCES users(phone) ON DELETE CASCADE,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(id)
+);
+
+-- Índices para búsquedas de receipts
+CREATE INDEX IF NOT EXISTS idx_receipt_user ON receipt_images(user_phone);
+CREATE INDEX IF NOT EXISTS idx_receipt_status ON receipt_images(status);
+
 -- ============================================
 -- Datos iniciales: Categorías predefinidas
 -- ============================================

@@ -11,6 +11,9 @@ import { getCategoryByName, suggestCategory, getAllCategories } from '../service
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
 import { getTutorialMessage } from '../services/tutorialService.js';
+import { downloadWhatsAppMedia } from '../services/whatsappMediaService.js';
+import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
+import { saveReceiptImage } from '../services/receiptService.js';
 
 /**
  * Webhook de verificación de WhatsApp
@@ -52,20 +55,33 @@ export async function receiveWebhook(req, res) {
         const messageData = extractMessageFromWebhook(req.body);
 
         if (!messageData) {
-            // No es un mensaje de texto o no hay mensaje
+            // No es un mensaje soportado o no hay mensaje
             return res.sendStatus(200);
         }
 
-        const { phone, message, messageId } = messageData;
-        console.log(`📱 Mensaje de ${phone}: "${message}"`);
+        const { type, phone, messageId } = messageData;
 
         // Marcar mensaje como leído
         await markAsRead(messageId);
 
-        // Procesar mensaje de forma asíncrona (no bloqueamos la respuesta)
-        processWhatsAppMessage(phone, message).catch(err => {
-            console.error('❌ Error procesando mensaje de WhatsApp:', err);
-        });
+        // Procesar según tipo de mensaje
+        if (type === 'text') {
+            const { message } = messageData;
+            console.log(`📱 Mensaje de texto de ${phone}: "${message}"`);
+
+            // Procesar mensaje de forma asíncrona (no bloqueamos la respuesta)
+            processWhatsAppMessage(phone, message).catch(err => {
+                console.error('❌ Error procesando mensaje de WhatsApp:', err);
+            });
+        } else if (type === 'image') {
+            const { mediaId, caption } = messageData;
+            console.log(`📸 Imagen recibida de ${phone}, caption: "${caption}"`);
+
+            // Procesar imagen de forma asíncrona
+            processImageMessage(phone, mediaId, messageId).catch(err => {
+                console.error('❌ Error procesando imagen de WhatsApp:', err);
+            });
+        }
 
         // Responder 200 inmediatamente a WhatsApp
         return res.sendStatus(200);
@@ -519,6 +535,137 @@ function handleConversacionGeneral(params) {
 
         default:
             return '¿En qué puedo ayudarte hoy?';
+    }
+}
+
+/**
+ * Procesa un mensaje de imagen (ticket de compra)
+ */
+async function processImageMessage(user_phone, mediaId, messageId) {
+    try {
+        console.log(`📸 Procesando imagen de ${user_phone}`);
+
+        // Crear o obtener usuario
+        const user = await getOrCreateUser(user_phone);
+        const normalizedPhone = user.phone;
+
+        // Enviar mensaje de "procesando"
+        await sendWhatsAppMessage(user_phone, '📸 Analizando tu ticket, un momento...');
+
+        // Descargar imagen
+        console.log('📥 Descargando imagen de WhatsApp...');
+        const media = await downloadWhatsAppMedia(mediaId);
+
+        // Extraer datos con OCR
+        console.log('🔍 Extrayendo datos del ticket con OCR...');
+        const ocrResult = await extractReceiptData(media.base64, media.mimeType);
+
+        if (!ocrResult.success) {
+            console.error('❌ OCR falló:', ocrResult.error);
+            await sendWhatsAppMessage(
+                user_phone,
+                '😕 No pude leer el ticket claramente. ¿Me puedes decir cuánto gastaste?'
+            );
+            return;
+        }
+
+        const { data } = ocrResult;
+        const validation = validateReceiptData(data);
+
+        // Si falta el monto, pedirlo
+        if (!validation.isValid && validation.missingFields.includes('amount')) {
+            await sendWhatsAppMessage(
+                user_phone,
+                '🤔 Vi el ticket pero no pude leer el monto total. ¿Cuánto fue?'
+            );
+
+            // Guardar contexto pendiente
+            await saveReceiptImage({
+                user_phone: normalizedPhone,
+                whatsapp_media_id: mediaId,
+                media_url: media.url,
+                ocr_result: data,
+                status: 'pending_amount'
+            });
+
+            return;
+        }
+
+        // Si la confianza es baja, pedir confirmación
+        if (validation.needsConfirmation) {
+            const confirmMessage = `Vi un gasto de $${data.amount} en ${data.category}. ¿Es correcto? (sí/no)`;
+            await sendWhatsAppMessage(user_phone, confirmMessage);
+
+            // Guardar en contexto para confirmar
+            await saveReceiptImage({
+                user_phone: normalizedPhone,
+                whatsapp_media_id: mediaId,
+                media_url: media.url,
+                ocr_result: data,
+                status: 'pending_confirmation'
+            });
+
+            return;
+        }
+
+        // Confianza alta: registrar automáticamente
+        console.log(`✅ Datos extraídos con confianza alta (${data.confidence}%)`);
+
+        // Buscar categoría
+        const category = await getCategoryByName(data.category);
+        if (!category) {
+            console.error(`❌ Categoría no encontrada: ${data.category}`);
+            await sendWhatsAppMessage(
+                user_phone,
+                `No encontré la categoría "${data.category}". ¿Me dices cuál debería ser?`
+            );
+            return;
+        }
+
+        // Crear transacción
+        const transaction = await createTransaction({
+            user_phone: normalizedPhone,
+            category_id: category.id,
+            type: 'expense',
+            amount: data.amount,
+            description: data.description || `Compra en ${data.merchant || 'comercio'}`,
+            transaction_date: data.date || new Date().toISOString().split('T')[0]
+        });
+
+        // Guardar registro de imagen
+        await saveReceiptImage({
+            user_phone: normalizedPhone,
+            whatsapp_media_id: mediaId,
+            media_url: media.url,
+            ocr_result: data,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+
+        // Confirmar al usuario
+        const response = `✅ ¡Listo! Registré un gasto de $${data.amount} en ${data.category} 📸
+
+"${data.description}"`;
+
+        await sendWhatsAppMessage(user_phone, response);
+
+        // Guardar en chat history
+        await saveChatMessage({
+            user_phone: normalizedPhone,
+            role: 'assistant',
+            message: response,
+            intent_json: null
+        });
+
+        console.log(`✅ Transacción creada desde imagen: ${transaction.id}`);
+
+    } catch (error) {
+        console.error('❌ Error procesando imagen de WhatsApp:', error);
+
+        await sendWhatsAppMessage(
+            user_phone,
+            'Lo siento, tuve un problema procesando la imagen. ¿Puedes intentar de nuevo o decirme el gasto manualmente?'
+        );
     }
 }
 

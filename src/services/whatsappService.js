@@ -76,9 +76,9 @@ export async function markAsRead(messageId) {
 }
 
 /**
- * Extrae el mensaje de texto del webhook de WhatsApp
+ * Extrae el mensaje del webhook de WhatsApp (texto o imagen)
  * @param {object} webhookBody - Body del webhook de WhatsApp
- * @returns {object|null} {phone, message, messageId} o null si no es un mensaje de texto
+ * @returns {object|null} {type, phone, message, messageId, mediaId} o null
  */
 export function extractMessageFromWebhook(webhookBody) {
     try {
@@ -92,22 +92,38 @@ export function extractMessageFromWebhook(webhookBody) {
         }
 
         const message = value.messages[0];
-
-        // Solo procesar mensajes de texto
-        if (message.type !== 'text') {
-            console.log('⚠️ Mensaje no es de texto, tipo:', message.type);
-            return null;
-        }
-
-        const phone = message.from; // Número del remitente
-        const text = message.text.body;
+        const phone = message.from;
         const messageId = message.id;
 
-        return {
-            phone,
-            message: text,
-            messageId
-        };
+        // Procesar según tipo de mensaje
+        if (message.type === 'text') {
+            const text = message.text.body;
+            return {
+                type: 'text',
+                phone,
+                message: text,
+                messageId
+            };
+        }
+
+        if (message.type === 'image') {
+            const mediaId = message.image.id;
+            const caption = message.image.caption || '';
+
+            console.log(`📸 Mensaje de imagen recibido de ${phone}, Media ID: ${mediaId}`);
+
+            return {
+                type: 'image',
+                phone,
+                messageId,
+                mediaId,
+                caption
+            };
+        }
+
+        // Otros tipos de mensaje no soportados (por ahora)
+        console.log('⚠️ Tipo de mensaje no soportado:', message.type);
+        return null;
 
     } catch (error) {
         console.error('❌ Error extrayendo mensaje del webhook:', error);
