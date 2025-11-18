@@ -192,7 +192,7 @@ async function processWhatsAppMessage(user_phone, message) {
 
         // Si es usuario nuevo y fue un saludo, enviar tutorial de bienvenida
         if (user.isNewUser && intent.action === 'conversacion_general') {
-            const tutorialMessage = getTutorialMessage();
+            const tutorialMessage = await getTutorialMessage();
             await sendWhatsAppMessage(user_phone, tutorialMessage);
             console.log(`📚 Tutorial enviado a nuevo usuario: ${normalizedPhone}`);
         }

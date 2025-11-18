@@ -9,8 +9,8 @@ import { getAllCategories } from './categoryService.js';
  * Genera el mensaje de tutorial para usuarios nuevos
  * @returns {string} Mensaje de bienvenida completo
  */
-export function getTutorialMessage() {
-    const categories = getAllCategories();
+export async function getTutorialMessage() {
+    const categories = await getAllCategories();
 
     // Separar categorías por tipo
     const expenseCategories = categories
