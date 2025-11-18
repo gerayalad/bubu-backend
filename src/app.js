@@ -85,11 +85,11 @@ app.use((error, req, res, next) => {
 // Inicialización
 // ============================================
 
-function startServer() {
+async function startServer() {
     try {
         // Inicializar base de datos
         console.log('🚀 Iniciando BUBU Backend...\n');
-        initDatabase();
+        await initDatabase();
 
         // Iniciar servidor
         app.listen(PORT, () => {

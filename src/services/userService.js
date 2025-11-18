@@ -3,7 +3,7 @@
  * Gestión de usuarios
  */
 
-import getDatabase from '../db/connection.js';
+import { query, queryOne, execute } from '../db/connection.js';
 
 /**
  * Normaliza un número de teléfono a 10 dígitos
@@ -37,20 +37,21 @@ function normalizePhoneNumber(phone) {
  * Crea o obtiene un usuario por su número de teléfono
  * Alta automática si no existe
  */
-export function getOrCreateUser(phone) {
-    const db = getDatabase();
+export async function getOrCreateUser(phone) {
     const normalizedPhone = normalizePhoneNumber(phone);
 
     // Buscar usuario existente
-    let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(normalizedPhone);
+    let user = await queryOne('SELECT * FROM users WHERE phone = $1', [normalizedPhone]);
     let isNewUser = false;
 
     // Si no existe, crearlo
     if (!user) {
-        const stmt = db.prepare('INSERT INTO users (phone) VALUES (?)');
-        const result = stmt.run(normalizedPhone);
+        const result = await execute(
+            'INSERT INTO users (phone) VALUES ($1) RETURNING *',
+            [normalizedPhone]
+        );
 
-        user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        user = result.rows[0];
         isNewUser = true;
         console.log(`✅ Usuario creado: ${normalizedPhone}`);
     }
@@ -67,9 +68,8 @@ export function getOrCreateUser(phone) {
  * @param {string} phone - Número de teléfono
  * @returns {object|null} Usuario o null si no existe
  */
-export function getUserByPhone(phone) {
-    const db = getDatabase();
-    return db.prepare('SELECT * FROM users WHERE phone = ?').get(phone);
+export async function getUserByPhone(phone) {
+    return await queryOne('SELECT * FROM users WHERE phone = $1', [phone]);
 }
 
 /**
@@ -78,19 +78,18 @@ export function getUserByPhone(phone) {
  * @param {object} data - Datos a actualizar (name, alias)
  * @returns {object} Usuario actualizado
  */
-export function updateUser(phone, data) {
-    const db = getDatabase();
-
+export async function updateUser(phone, data) {
     const { name, alias } = data;
     const updates = [];
     const values = [];
+    let paramCount = 1;
 
     if (name !== undefined) {
-        updates.push('name = ?');
+        updates.push(`name = $${paramCount++}`);
         values.push(name);
     }
     if (alias !== undefined) {
-        updates.push('alias = ?');
+        updates.push(`alias = $${paramCount++}`);
         values.push(alias);
     }
 
@@ -101,19 +100,18 @@ export function updateUser(phone, data) {
     updates.push('updated_at = CURRENT_TIMESTAMP');
     values.push(phone);
 
-    const sql = `UPDATE users SET ${updates.join(', ')} WHERE phone = ?`;
-    db.prepare(sql).run(...values);
+    const sql = `UPDATE users SET ${updates.join(', ')} WHERE phone = $${paramCount}`;
+    await execute(sql, values);
 
-    return getUserByPhone(phone);
+    return await getUserByPhone(phone);
 }
 
 /**
  * Obtiene todos los usuarios
  * @returns {Array} Lista de usuarios
  */
-export function getAllUsers() {
-    const db = getDatabase();
-    return db.prepare('SELECT * FROM users ORDER BY created_at DESC').all();
+export async function getAllUsers() {
+    return await query('SELECT * FROM users ORDER BY created_at DESC');
 }
 
 export default {

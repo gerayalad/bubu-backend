@@ -12,7 +12,7 @@ import {
 
 export async function create(req, res) {
     try {
-        const transaction = createTransaction(req.body);
+        const transaction = await createTransaction(req.body);
 
         return res.status(201).json({
             success: true,
@@ -38,7 +38,7 @@ export async function list(req, res) {
             limit: parseInt(req.query.limit) || 100
         };
 
-        const transactions = getUserTransactions(user_phone, filters);
+        const transactions = await getUserTransactions(user_phone, filters);
 
         return res.json({
             success: true,
@@ -61,7 +61,7 @@ export async function getSummary(req, res) {
             endDate: req.query.end_date
         };
 
-        const summary = getFinancialSummary(user_phone, period);
+        const summary = await getFinancialSummary(user_phone, period);
 
         return res.json({
             success: true,
@@ -81,7 +81,7 @@ export async function remove(req, res) {
         const { id } = req.params;
         const { user_phone } = req.body;
 
-        deleteTransaction(id, user_phone);
+        await deleteTransaction(id, user_phone);
 
         return res.json({
             success: true,
@@ -101,7 +101,7 @@ export async function update(req, res) {
         const { id } = req.params;
         const { user_phone, ...updates } = req.body;
 
-        const transaction = updateTransaction(id, user_phone, updates);
+        const transaction = await updateTransaction(id, user_phone, updates);
 
         return res.json({
             success: true,

@@ -15,7 +15,7 @@ export async function getOrCreate(req, res) {
             });
         }
 
-        const user = getOrCreateUser(phone);
+        const user = await getOrCreateUser(phone);
 
         return res.json({
             success: true,
@@ -34,7 +34,7 @@ export async function getUser(req, res) {
     try {
         const { phone } = req.params;
 
-        const user = getUserByPhone(phone);
+        const user = await getUserByPhone(phone);
 
         if (!user) {
             return res.status(404).json({
@@ -61,7 +61,7 @@ export async function update(req, res) {
         const { phone } = req.params;
         const updates = req.body;
 
-        const user = updateUser(phone, updates);
+        const user = await updateUser(phone, updates);
 
         return res.json({
             success: true,
@@ -78,7 +78,7 @@ export async function update(req, res) {
 
 export async function listUsers(req, res) {
     try {
-        const users = getAllUsers();
+        const users = await getAllUsers();
 
         return res.json({
             success: true,

@@ -26,14 +26,14 @@ export async function processMessage(req, res) {
         }
 
         // Crear o obtener usuario
-        const user = getOrCreateUser(user_phone);
+        const user = await getOrCreateUser(user_phone);
 
         // Parsear intent con OpenAI
         const intent = await parseIntent(message, user_phone);
 
         // Guardar mensaje del usuario
-        saveChatMessage({
-            user_phone,
+        await saveChatMessage({
+            user_phone: user.phone,
             role: 'user',
             message,
             intent_json: intent
@@ -102,7 +102,7 @@ export async function processMessage(req, res) {
                 break;
 
             case 'consultar_categorias':
-                result = handleConsultarCategorias(intent.parameters);
+                result = await handleConsultarCategorias(intent.parameters);
                 response = result.response;
                 break;
 
@@ -122,8 +122,8 @@ export async function processMessage(req, res) {
         }
 
         // Guardar respuesta del asistente
-        saveChatMessage({
-            user_phone,
+        await saveChatMessage({
+            user_phone: user.phone,
             role: 'assistant',
             message: response,
             intent_json: null
@@ -157,11 +157,11 @@ async function handleRegistrarTransaccion(user_phone, params) {
     const type = tipo === 'gasto' ? 'expense' : 'income';
 
     // Buscar categoría
-    let category = getCategoryByName(categoria);
+    let category = await getCategoryByName(categoria);
 
     // Si no se encuentra, sugerir una basada en la descripción
     if (!category) {
-        category = suggestCategory(descripcion, type);
+        category = await suggestCategory(descripcion, type);
     }
 
     if (!category) {
@@ -175,7 +175,7 @@ async function handleRegistrarTransaccion(user_phone, params) {
     }
 
     // Crear transacción
-    const transaction = createTransaction({
+    const transaction = await createTransaction({
         user_phone,
         category_id: category.id,
         type,
@@ -232,7 +232,7 @@ async function handleConsultarEstado(user_phone, params) {
     }
 
     // Obtener resumen
-    const summary = getFinancialSummary(user_phone, {
+    const summary = await getFinancialSummary(user_phone, {
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0]
     });
@@ -269,7 +269,7 @@ async function handleListarTransacciones(user_phone, params) {
 
     // Filtrar por categoría si se especifica
     if (categoria) {
-        const category = getCategoryByName(categoria);
+        const category = await getCategoryByName(categoria);
         if (category) {
             filters.category_id = category.id;
         }
@@ -316,7 +316,7 @@ async function handleListarTransacciones(user_phone, params) {
         }
     }
 
-    return getUserTransactions(user_phone, filters);
+    return await getUserTransactions(user_phone, filters);
 }
 
 /**
@@ -333,7 +333,7 @@ async function handleEliminarTransaccion(user_phone, params) {
     }
 
     // Eliminar transacción
-    deleteTransaction(transaction.id, user_phone);
+    await deleteTransaction(transaction.id, user_phone);
 
     return {
         deleted: transaction,
@@ -357,7 +357,7 @@ async function handleEditarTransaccion(user_phone, params) {
     const oldAmount = transaction.amount;
 
     // Actualizar transacción
-    const updated = updateTransaction(transaction.id, user_phone, {
+    const updated = await updateTransaction(transaction.id, user_phone, {
         amount: nuevo_monto
     });
 
@@ -372,9 +372,9 @@ async function handleEditarTransaccion(user_phone, params) {
 /**
  * Maneja consulta de categorías disponibles
  */
-function handleConsultarCategorias(params) {
+async function handleConsultarCategorias(params) {
     const { tipo_categoria = 'todas' } = params;
-    const categories = getAllCategories();
+    const categories = await getAllCategories();
 
     let filteredCategories;
     let tipoTexto;
@@ -506,7 +506,7 @@ export async function getHistory(req, res) {
         const { user_phone } = req.params;
         const limit = parseInt(req.query.limit) || 50;
 
-        const history = getChatHistory(user_phone, limit);
+        const history = await getChatHistory(user_phone, limit);
 
         return res.json({
             success: true,

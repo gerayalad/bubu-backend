@@ -3,30 +3,28 @@
  * Gestión de mensajes del chat y auditoría
  */
 
-import getDatabase from '../db/connection.js';
+import { query, queryOne, execute } from '../db/connection.js';
 
 /**
  * Guarda un mensaje del chat
  * @param {object} data - Datos del mensaje
  * @returns {object} Mensaje guardado
  */
-export function saveChatMessage(data) {
-    const db = getDatabase();
+export async function saveChatMessage(data) {
     const { user_phone, role = 'user', message, intent_json } = data;
 
-    const stmt = db.prepare(`
-        INSERT INTO chat_messages (user_phone, role, message, intent_json)
-        VALUES (?, ?, ?, ?)
-    `);
-
-    const result = stmt.run(
-        user_phone,
-        role,
-        message,
-        intent_json ? JSON.stringify(intent_json) : null
+    const result = await execute(
+        `INSERT INTO chat_messages (user_phone, role, message, intent_json)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [
+            user_phone,
+            role,
+            message,
+            intent_json ? JSON.stringify(intent_json) : null
+        ]
     );
 
-    return getChatMessageById(result.lastInsertRowid);
+    return await getChatMessageById(result.rows[0].id);
 }
 
 /**
@@ -34,12 +32,15 @@ export function saveChatMessage(data) {
  * @param {number} id - ID del mensaje
  * @returns {object|null} Mensaje o null
  */
-export function getChatMessageById(id) {
-    const db = getDatabase();
-    const msg = db.prepare('SELECT * FROM chat_messages WHERE id = ?').get(id);
+export async function getChatMessageById(id) {
+    const msg = await queryOne('SELECT * FROM chat_messages WHERE id = $1', [id]);
 
     if (msg && msg.intent_json) {
-        msg.intent_json = JSON.parse(msg.intent_json);
+        try {
+            msg.intent_json = JSON.parse(msg.intent_json);
+        } catch (e) {
+            msg.intent_json = null;
+        }
     }
 
     return msg;
@@ -51,14 +52,13 @@ export function getChatMessageById(id) {
  * @param {number} limit - Límite de mensajes
  * @returns {Array} Lista de mensajes
  */
-export function getChatHistory(user_phone, limit = 50) {
-    const db = getDatabase();
-    const messages = db.prepare(`
+export async function getChatHistory(user_phone, limit = 50) {
+    const messages = await query(`
         SELECT * FROM chat_messages
-        WHERE user_phone = ?
+        WHERE user_phone = $1
         ORDER BY created_at DESC
-        LIMIT ?
-    `).all(user_phone, limit);
+        LIMIT $2
+    `, [user_phone, limit]);
 
     // Parsear JSON
     return messages.map(msg => {

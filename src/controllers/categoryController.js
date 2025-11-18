@@ -7,7 +7,7 @@ import { getAllCategories, getCategoryById, createCategory } from '../services/c
 export async function list(req, res) {
     try {
         const { type } = req.query;
-        const categories = getAllCategories(type);
+        const categories = await getAllCategories(type);
 
         return res.json({
             success: true,
@@ -25,7 +25,7 @@ export async function list(req, res) {
 export async function getById(req, res) {
     try {
         const { id } = req.params;
-        const category = getCategoryById(id);
+        const category = await getCategoryById(id);
 
         if (!category) {
             return res.status(404).json({
@@ -49,7 +49,7 @@ export async function getById(req, res) {
 
 export async function create(req, res) {
     try {
-        const category = createCategory(req.body);
+        const category = await createCategory(req.body);
 
         return res.status(201).json({
             success: true,

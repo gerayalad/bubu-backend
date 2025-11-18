@@ -83,14 +83,14 @@ export async function receiveWebhook(req, res) {
 async function processWhatsAppMessage(user_phone, message) {
     try {
         // Crear o obtener usuario (normaliza el número internamente)
-        const user = getOrCreateUser(user_phone);
+        const user = await getOrCreateUser(user_phone);
         const normalizedPhone = user.phone; // Usar el teléfono normalizado de la BD
 
         // Parsear intent con OpenAI
         const intent = await parseIntent(message, normalizedPhone);
 
         // Guardar mensaje del usuario
-        saveChatMessage({
+        await saveChatMessage({
             user_phone: normalizedPhone, // Usar número normalizado
             role: 'user',
             message,
@@ -158,7 +158,7 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'consultar_categorias':
-                result = handleConsultarCategorias(intent.parameters);
+                result = await handleConsultarCategorias(intent.parameters);
                 response = result.response;
                 break;
 
@@ -178,7 +178,7 @@ async function processWhatsAppMessage(user_phone, message) {
         }
 
         // Guardar respuesta del asistente
-        saveChatMessage({
+        await saveChatMessage({
             user_phone: normalizedPhone, // Usar número normalizado
             role: 'assistant',
             message: response,
@@ -214,9 +214,9 @@ async function handleRegistrarTransaccion(user_phone, params) {
     const { tipo, monto, descripcion, categoria, fecha } = params;
     const type = tipo === 'gasto' ? 'expense' : 'income';
 
-    let category = getCategoryByName(categoria);
+    let category = await getCategoryByName(categoria);
     if (!category) {
-        category = suggestCategory(descripcion, type);
+        category = await suggestCategory(descripcion, type);
     }
     if (!category) {
         throw new Error(`No encontré la categoría "${categoria}"`);
@@ -227,7 +227,7 @@ async function handleRegistrarTransaccion(user_phone, params) {
         transactionDate = new Date().toISOString().split('T')[0];
     }
 
-    const transaction = createTransaction({
+    const transaction = await createTransaction({
         user_phone,
         category_id: category.id,
         type,
@@ -279,7 +279,7 @@ async function handleConsultarEstado(user_phone, params) {
             endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
     }
 
-    const summary = getFinancialSummary(user_phone, {
+    const summary = await getFinancialSummary(user_phone, {
         startDate: startDate.toISOString().split('T')[0],
         endDate: endDate.toISOString().split('T')[0]
     });
@@ -310,7 +310,7 @@ async function handleListarTransacciones(user_phone, params) {
     }
 
     if (categoria) {
-        const category = getCategoryByName(categoria);
+        const category = await getCategoryByName(categoria);
         if (category) {
             filters.category_id = category.id;
         }
@@ -356,7 +356,7 @@ async function handleListarTransacciones(user_phone, params) {
         }
     }
 
-    return getUserTransactions(user_phone, filters);
+    return await getUserTransactions(user_phone, filters);
 }
 
 async function handleEliminarTransaccion(user_phone, params) {
@@ -367,7 +367,7 @@ async function handleEliminarTransaccion(user_phone, params) {
         throw new Error(`No encontré la transacción #${numero}. ¿Podrías pedirme que liste las transacciones primero?`);
     }
 
-    deleteTransaction(transaction.id, user_phone);
+    await deleteTransaction(transaction.id, user_phone);
 
     return {
         deleted: transaction,
@@ -384,7 +384,7 @@ async function handleEditarTransaccion(user_phone, params) {
     }
 
     const oldAmount = transaction.amount;
-    const updated = updateTransaction(transaction.id, user_phone, {
+    const updated = await updateTransaction(transaction.id, user_phone, {
         amount: nuevo_monto
     });
 
@@ -399,9 +399,9 @@ async function handleEditarTransaccion(user_phone, params) {
 /**
  * Maneja consulta de categorías disponibles
  */
-function handleConsultarCategorias(params) {
+async function handleConsultarCategorias(params) {
     const { tipo_categoria = 'todas' } = params;
-    const categories = getAllCategories();
+    const categories = await getAllCategories();
 
     let filteredCategories;
     let tipoTexto;

@@ -1,41 +1,92 @@
 /**
- * BUBU - Conexión a Base de Datos SQLite
- * Maneja la conexión y operaciones con better-sqlite3
+ * BUBU - Conexión a Base de Datos PostgreSQL
+ * Maneja el pool de conexiones con node-postgres (pg)
  */
 
-import Database from 'better-sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import pg from 'pg';
+const { Pool } = pg;
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Ruta a la base de datos
-const DB_PATH = join(__dirname, '../../database.sqlite');
-
-// Crear conexión a la base de datos
-let db = null;
+// Pool de conexiones
+let pool = null;
 
 /**
- * Obtiene la instancia de la base de datos
- * @returns {Database} Instancia de la base de datos
+ * Obtiene el pool de conexiones a PostgreSQL
+ * @returns {Pool} Pool de conexiones
  */
 export function getDatabase() {
-    if (!db) {
-        db = new Database(DB_PATH, { verbose: console.log });
-        db.pragma('journal_mode = WAL'); // Write-Ahead Logging para mejor performance
-        db.pragma('foreign_keys = ON'); // Habilitar foreign keys
+    if (!pool) {
+        // Configuración del pool
+        const config = {
+            connectionString: process.env.DATABASE_URL,
+            ssl: process.env.NODE_ENV === 'production' ? {
+                rejectUnauthorized: false // Railway requiere esto
+            } : false,
+            max: 20, // Máximo de conexiones en el pool
+            idleTimeoutMillis: 30000,
+            connectionTimeoutMillis: 2000,
+        };
+
+        pool = new Pool(config);
+
+        // Manejar errores del pool
+        pool.on('error', (err) => {
+            console.error('Error inesperado en el pool de PostgreSQL:', err);
+        });
+
+        console.log('✅ Pool de PostgreSQL creado');
     }
-    return db;
+
+    return pool;
 }
 
 /**
- * Cierra la conexión a la base de datos
+ * Ejecuta una query y devuelve todas las filas
+ * @param {string} sql - Query SQL
+ * @param {Array} params - Parámetros de la query
+ * @returns {Promise<Array>} Filas resultantes
  */
-export function closeDatabase() {
-    if (db) {
-        db.close();
-        db = null;
+export async function query(sql, params = []) {
+    const pool = getDatabase();
+    const result = await pool.query(sql, params);
+    return result.rows;
+}
+
+/**
+ * Ejecuta una query y devuelve una sola fila
+ * @param {string} sql - Query SQL
+ * @param {Array} params - Parámetros de la query
+ * @returns {Promise<Object|null>} Primera fila o null
+ */
+export async function queryOne(sql, params = []) {
+    const pool = getDatabase();
+    const result = await pool.query(sql, params);
+    return result.rows[0] || null;
+}
+
+/**
+ * Ejecuta una query de modificación (INSERT, UPDATE, DELETE)
+ * @param {string} sql - Query SQL
+ * @param {Array} params - Parámetros de la query
+ * @returns {Promise<Object>} Resultado con rowCount y rows
+ */
+export async function execute(sql, params = []) {
+    const pool = getDatabase();
+    const result = await pool.query(sql, params);
+    return {
+        rowCount: result.rowCount,
+        rows: result.rows,
+        lastId: result.rows[0]?.id // Para INSERTs con RETURNING id
+    };
+}
+
+/**
+ * Cierra el pool de conexiones
+ */
+export async function closeDatabase() {
+    if (pool) {
+        await pool.end();
+        pool = null;
+        console.log('✅ Pool de PostgreSQL cerrado');
     }
 }
 

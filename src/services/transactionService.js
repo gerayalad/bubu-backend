@@ -3,15 +3,14 @@
  * Gestión de transacciones (ingresos y gastos)
  */
 
-import getDatabase from '../db/connection.js';
+import { query, queryOne, execute } from '../db/connection.js';
 
 /**
  * Crea una nueva transacción
  * @param {object} data - Datos de la transacción
  * @returns {object} Transacción creada
  */
-export function createTransaction(data) {
-    const db = getDatabase();
+export async function createTransaction(data) {
     const { user_phone, category_id, type, amount, description, transaction_date } = data;
 
     // Validaciones
@@ -30,14 +29,13 @@ export function createTransaction(data) {
     // Usar fecha actual si no se proporciona
     const finalDate = transaction_date || new Date().toISOString().split('T')[0];
 
-    const stmt = db.prepare(`
-        INSERT INTO transactions (user_phone, category_id, type, amount, description, transaction_date)
-        VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const result = await execute(
+        `INSERT INTO transactions (user_phone, category_id, type, amount, description, transaction_date)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+        [user_phone, category_id, type, amount, description || null, finalDate]
+    );
 
-    const result = stmt.run(user_phone, category_id, type, amount, description || null, finalDate);
-
-    return getTransactionById(result.lastInsertRowid);
+    return await getTransactionById(result.rows[0].id);
 }
 
 /**
@@ -45,9 +43,8 @@ export function createTransaction(data) {
  * @param {number} id - ID de la transacción
  * @returns {object|null} Transacción o null
  */
-export function getTransactionById(id) {
-    const db = getDatabase();
-    return db.prepare(`
+export async function getTransactionById(id) {
+    return await queryOne(`
         SELECT
             t.*,
             c.name as category_name,
@@ -55,8 +52,8 @@ export function getTransactionById(id) {
             c.color as category_color
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
-        WHERE t.id = ?
-    `).get(id);
+        WHERE t.id = $1
+    `, [id]);
 }
 
 /**
@@ -65,8 +62,7 @@ export function getTransactionById(id) {
  * @param {object} filters - Filtros opcionales (startDate, endDate, type, category_id)
  * @returns {Array} Lista de transacciones
  */
-export function getUserTransactions(user_phone, filters = {}) {
-    const db = getDatabase();
+export async function getUserTransactions(user_phone, filters = {}) {
     const { startDate, endDate, type, category_id, limit = 100 } = filters;
 
     let sql = `
@@ -77,35 +73,36 @@ export function getUserTransactions(user_phone, filters = {}) {
             c.color as category_color
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
-        WHERE t.user_phone = ?
+        WHERE t.user_phone = $1
     `;
 
     const params = [user_phone];
+    let paramCount = 2;
 
     if (startDate) {
-        sql += ' AND t.transaction_date >= ?';
+        sql += ` AND t.transaction_date >= $${paramCount++}`;
         params.push(startDate);
     }
 
     if (endDate) {
-        sql += ' AND t.transaction_date <= ?';
+        sql += ` AND t.transaction_date <= $${paramCount++}`;
         params.push(endDate);
     }
 
     if (type) {
-        sql += ' AND t.type = ?';
+        sql += ` AND t.type = $${paramCount++}`;
         params.push(type);
     }
 
     if (category_id) {
-        sql += ' AND t.category_id = ?';
+        sql += ` AND t.category_id = $${paramCount++}`;
         params.push(category_id);
     }
 
-    sql += ' ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT ?';
+    sql += ` ORDER BY t.transaction_date DESC, t.created_at DESC LIMIT $${paramCount}`;
     params.push(limit);
 
-    return db.prepare(sql).all(...params);
+    return await query(sql, params);
 }
 
 /**
@@ -114,9 +111,7 @@ export function getUserTransactions(user_phone, filters = {}) {
  * @param {object} period - Periodo (startDate, endDate)
  * @returns {object} Resumen con totales de ingresos, gastos y balance
  */
-export function getFinancialSummary(user_phone, period = {}) {
-    const db = getDatabase();
-
+export async function getFinancialSummary(user_phone, period = {}) {
     // Si no se especifica periodo, usar el mes actual
     if (!period.startDate || !period.endDate) {
         const now = new Date();
@@ -125,19 +120,19 @@ export function getFinancialSummary(user_phone, period = {}) {
     }
 
     // Calcular totales
-    const summary = db.prepare(`
+    const summary = await queryOne(`
         SELECT
             SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as total_income,
             SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as total_expense,
             COUNT(CASE WHEN type = 'income' THEN 1 END) as income_count,
             COUNT(CASE WHEN type = 'expense' THEN 1 END) as expense_count
         FROM transactions
-        WHERE user_phone = ?
-        AND transaction_date BETWEEN ? AND ?
-    `).get(user_phone, period.startDate, period.endDate);
+        WHERE user_phone = $1
+        AND transaction_date BETWEEN $2 AND $3
+    `, [user_phone, period.startDate, period.endDate]);
 
     // Calcular por categoría
-    const byCategory = db.prepare(`
+    const byCategory = await query(`
         SELECT
             c.name as category,
             c.icon,
@@ -147,11 +142,11 @@ export function getFinancialSummary(user_phone, period = {}) {
             COUNT(*) as count
         FROM transactions t
         JOIN categories c ON t.category_id = c.id
-        WHERE t.user_phone = ?
-        AND t.transaction_date BETWEEN ? AND ?
+        WHERE t.user_phone = $1
+        AND t.transaction_date BETWEEN $2 AND $3
         GROUP BY c.id, c.name, c.icon, c.color, t.type
         ORDER BY total DESC
-    `).all(user_phone, period.startDate, period.endDate);
+    `, [user_phone, period.startDate, period.endDate]);
 
     const totalIncome = summary.total_income || 0;
     const totalExpense = summary.total_expense || 0;
@@ -181,17 +176,18 @@ export function getFinancialSummary(user_phone, period = {}) {
  * @param {string} user_phone - Teléfono del usuario (para validar propiedad)
  * @returns {boolean} true si se eliminó
  */
-export function deleteTransaction(id, user_phone) {
-    const db = getDatabase();
-
+export async function deleteTransaction(id, user_phone) {
     // Verificar que la transacción pertenece al usuario
-    const transaction = db.prepare('SELECT * FROM transactions WHERE id = ? AND user_phone = ?').get(id, user_phone);
+    const transaction = await queryOne(
+        'SELECT * FROM transactions WHERE id = $1 AND user_phone = $2',
+        [id, user_phone]
+    );
 
     if (!transaction) {
         throw new Error('Transacción no encontrada o no pertenece al usuario');
     }
 
-    db.prepare('DELETE FROM transactions WHERE id = ?').run(id);
+    await execute('DELETE FROM transactions WHERE id = $1', [id]);
     return true;
 }
 
@@ -202,11 +198,12 @@ export function deleteTransaction(id, user_phone) {
  * @param {object} data - Datos a actualizar
  * @returns {object} Transacción actualizada
  */
-export function updateTransaction(id, user_phone, data) {
-    const db = getDatabase();
-
+export async function updateTransaction(id, user_phone, data) {
     // Verificar que la transacción pertenece al usuario
-    const transaction = db.prepare('SELECT * FROM transactions WHERE id = ? AND user_phone = ?').get(id, user_phone);
+    const transaction = await queryOne(
+        'SELECT * FROM transactions WHERE id = $1 AND user_phone = $2',
+        [id, user_phone]
+    );
 
     if (!transaction) {
         throw new Error('Transacción no encontrada o no pertenece al usuario');
@@ -215,22 +212,23 @@ export function updateTransaction(id, user_phone, data) {
     const { category_id, amount, description, transaction_date } = data;
     const updates = [];
     const values = [];
+    let paramCount = 1;
 
     if (category_id !== undefined) {
-        updates.push('category_id = ?');
+        updates.push(`category_id = $${paramCount++}`);
         values.push(category_id);
     }
     if (amount !== undefined) {
         if (amount <= 0) throw new Error('El monto debe ser mayor a 0');
-        updates.push('amount = ?');
+        updates.push(`amount = $${paramCount++}`);
         values.push(amount);
     }
     if (description !== undefined) {
-        updates.push('description = ?');
+        updates.push(`description = $${paramCount++}`);
         values.push(description);
     }
     if (transaction_date !== undefined) {
-        updates.push('transaction_date = ?');
+        updates.push(`transaction_date = $${paramCount++}`);
         values.push(transaction_date);
     }
 
@@ -240,10 +238,10 @@ export function updateTransaction(id, user_phone, data) {
 
     values.push(id);
 
-    const sql = `UPDATE transactions SET ${updates.join(', ')} WHERE id = ?`;
-    db.prepare(sql).run(...values);
+    const sql = `UPDATE transactions SET ${updates.join(', ')} WHERE id = $${paramCount}`;
+    await execute(sql, values);
 
-    return getTransactionById(id);
+    return await getTransactionById(id);
 }
 
 export default {

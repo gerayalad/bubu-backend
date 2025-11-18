@@ -6,7 +6,7 @@
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import getDatabase from './connection.js';
+import getDatabase, { queryOne } from './connection.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,24 +14,24 @@ const __dirname = dirname(__filename);
 /**
  * Inicializa la base de datos ejecutando el schema SQL
  */
-export function initDatabase() {
+export async function initDatabase() {
     console.log('🗄️  Inicializando base de datos...');
 
     try {
-        const db = getDatabase();
+        const pool = getDatabase();
 
         // Leer el schema SQL
         const schemaPath = join(__dirname, 'schema.sql');
         const schema = readFileSync(schemaPath, 'utf-8');
 
-        // Ejecutar el schema completo
-        db.exec(schema);
+        // Ejecutar el schema completo (PostgreSQL soporta múltiples statements)
+        await pool.query(schema);
 
         console.log('✅ Base de datos inicializada correctamente');
         console.log('📊 Tablas creadas: users, categories, transactions, chat_messages');
 
         // Mostrar estadísticas
-        const categoryCount = db.prepare('SELECT COUNT(*) as count FROM categories').get();
+        const categoryCount = await queryOne('SELECT COUNT(*) as count FROM categories');
         console.log(`📂 Categorías cargadas: ${categoryCount.count}`);
 
         return true;
@@ -43,7 +43,7 @@ export function initDatabase() {
 
 // Si se ejecuta directamente
 if (import.meta.url === `file://${process.argv[1]}`) {
-    initDatabase();
+    await initDatabase();
     process.exit(0);
 }
 

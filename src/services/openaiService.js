@@ -10,8 +10,8 @@ import { getAllCategories } from './categoryService.js';
  * Define las funciones que OpenAI puede invocar
  * Estas funciones representan las acciones que el usuario puede solicitar
  */
-function getOpenAIFunctions() {
-    const categories = getAllCategories();
+async function getOpenAIFunctions() {
+    const categories = await getAllCategories();
 
     return [
         {
@@ -229,7 +229,7 @@ function calcularFechaRelativa(referencia) {
  */
 export async function parseIntent(mensaje, userPhone = null) {
     try {
-        const functions = getOpenAIFunctions();
+        const functions = await getOpenAIFunctions();
         const today = new Date().toISOString().split('T')[0];
 
         const systemPrompt = `Eres un asistente de finanzas personales llamado BUBU.
@@ -310,7 +310,7 @@ Sé inteligente al categorizar. Si el usuario dice "tacos", "pizza", "restaurant
 Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: mensaje }
@@ -457,7 +457,7 @@ Genera una confirmación breve (1-2 líneas) diciendo que se actualizó el monto
         }
 
         const response = await openai.chat.completions.create({
-            model: 'gpt-4',
+            model: 'gpt-4o-mini',
             messages: [
                 {
                     role: 'system',

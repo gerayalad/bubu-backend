@@ -3,21 +3,19 @@
  * Gestión de categorías de ingresos y gastos
  */
 
-import getDatabase from '../db/connection.js';
+import { query, queryOne, execute } from '../db/connection.js';
 
 /**
  * Obtiene todas las categorías
  * @param {string} type - Filtro opcional por tipo (income/expense)
  * @returns {Array} Lista de categorías
  */
-export function getAllCategories(type = null) {
-    const db = getDatabase();
-
+export async function getAllCategories(type = null) {
     if (type) {
-        return db.prepare('SELECT * FROM categories WHERE type = ? ORDER BY name').all(type);
+        return await query('SELECT * FROM categories WHERE type = $1 ORDER BY name', [type]);
     }
 
-    return db.prepare('SELECT * FROM categories ORDER BY type, name').all();
+    return await query('SELECT * FROM categories ORDER BY type, name');
 }
 
 /**
@@ -25,9 +23,8 @@ export function getAllCategories(type = null) {
  * @param {number} id - ID de la categoría
  * @returns {object|null} Categoría o null
  */
-export function getCategoryById(id) {
-    const db = getDatabase();
-    return db.prepare('SELECT * FROM categories WHERE id = ?').get(id);
+export async function getCategoryById(id) {
+    return await queryOne('SELECT * FROM categories WHERE id = $1', [id]);
 }
 
 /**
@@ -35,9 +32,8 @@ export function getCategoryById(id) {
  * @param {string} name - Nombre de la categoría
  * @returns {object|null} Categoría o null
  */
-export function getCategoryByName(name) {
-    const db = getDatabase();
-    return db.prepare('SELECT * FROM categories WHERE LOWER(name) = LOWER(?)').get(name);
+export async function getCategoryByName(name) {
+    return await queryOne('SELECT * FROM categories WHERE LOWER(name) = LOWER($1)', [name]);
 }
 
 /**
@@ -45,8 +41,7 @@ export function getCategoryByName(name) {
  * @param {object} data - Datos de la categoría
  * @returns {object} Categoría creada
  */
-export function createCategory(data) {
-    const db = getDatabase();
+export async function createCategory(data) {
     const { name, type, color, icon } = data;
 
     if (!name || !type) {
@@ -57,14 +52,13 @@ export function createCategory(data) {
         throw new Error('Tipo inválido. Debe ser "income" o "expense"');
     }
 
-    const stmt = db.prepare(`
-        INSERT INTO categories (name, type, color, icon)
-        VALUES (?, ?, ?, ?)
-    `);
+    const result = await execute(
+        `INSERT INTO categories (name, type, color, icon)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [name, type, color || '#6B7280', icon || null]
+    );
 
-    const result = stmt.run(name, type, color || '#6B7280', icon || null);
-
-    return getCategoryById(result.lastInsertRowid);
+    return result.rows[0];
 }
 
 /**
@@ -73,8 +67,7 @@ export function createCategory(data) {
  * @param {string} type - Tipo (income/expense)
  * @returns {object|null} Categoría sugerida
  */
-export function suggestCategory(description, type) {
-    const db = getDatabase();
+export async function suggestCategory(description, type) {
     const lowerDesc = description.toLowerCase();
 
     // Mapeo de palabras clave a categorías
@@ -101,14 +94,14 @@ export function suggestCategory(description, type) {
 
     for (const [categoryName, words] of Object.entries(typeKeywords)) {
         if (words.some(word => lowerDesc.includes(word))) {
-            const category = getCategoryByName(categoryName);
+            const category = await getCategoryByName(categoryName);
             if (category) return category;
         }
     }
 
     // Si no se encuentra, retornar categoría "Otros"
     const fallbackName = type === 'expense' ? 'Otros Gastos' : 'Otros Ingresos';
-    return getCategoryByName(fallbackName);
+    return await getCategoryByName(fallbackName);
 }
 
 export default {
