@@ -10,6 +10,7 @@ import { createTransaction, getFinancialSummary, getUserTransactions, deleteTran
 import { getCategoryByName, suggestCategory } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber } from '../services/contextService.js';
+import { getTutorialMessage } from '../services/tutorialService.js';
 
 /**
  * Webhook de verificación de WhatsApp
@@ -174,6 +175,13 @@ async function processWhatsAppMessage(user_phone, message) {
         await sendWhatsAppMessage(user_phone, response);
 
         console.log(`✅ Respuesta enviada a ${user_phone}`);
+
+        // Si es usuario nuevo y fue un saludo, enviar tutorial de bienvenida
+        if (user.isNewUser && intent.action === 'conversacion_general') {
+            const tutorialMessage = getTutorialMessage();
+            await sendWhatsAppMessage(user_phone, tutorialMessage);
+            console.log(`📚 Tutorial enviado a nuevo usuario: ${normalizedPhone}`);
+        }
 
     } catch (error) {
         console.error('❌ Error procesando mensaje de WhatsApp:', error);

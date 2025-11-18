@@ -43,6 +43,7 @@ export function getOrCreateUser(phone) {
 
     // Buscar usuario existente
     let user = db.prepare('SELECT * FROM users WHERE phone = ?').get(normalizedPhone);
+    let isNewUser = false;
 
     // Si no existe, crearlo
     if (!user) {
@@ -50,10 +51,15 @@ export function getOrCreateUser(phone) {
         const result = stmt.run(normalizedPhone);
 
         user = db.prepare('SELECT * FROM users WHERE id = ?').get(result.lastInsertRowid);
+        isNewUser = true;
         console.log(`✅ Usuario creado: ${normalizedPhone}`);
     }
 
-    return user;
+    // Agregar flag para saber si es nuevo
+    return {
+        ...user,
+        isNewUser
+    };
 }
 
 /**
