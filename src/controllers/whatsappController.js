@@ -120,6 +120,55 @@ async function processWhatsAppMessage(user_phone, message) {
         const user = await getOrCreateUser(user_phone);
         const normalizedPhone = user.phone; // Usar el teléfono normalizado de la BD
 
+        // DETECCIÓN TEMPRANA: Verificar si hay una transacción pendiente de confirmación
+        const pendingTx = getPendingTransaction(normalizedPhone);
+        if (pendingTx) {
+            const lowerMsg = message.toLowerCase().trim();
+
+            // Detectar confirmación
+            const isAffirmative = ['sí', 'si', 'ok', 'confirmo', 'confirma', 'correcto', 'yes'].some(word =>
+                lowerMsg === word || lowerMsg.startsWith(word + ' '));
+
+            // Detectar cancelación
+            const isCancel = ['no', 'cancelar', 'cancela'].some(word =>
+                lowerMsg === word || lowerMsg.startsWith(word + ' '));
+
+            if (isAffirmative) {
+                // Crear transacción confirmada
+                const transaction = await createTransaction({
+                    user_phone: normalizedPhone,
+                    category_id: pendingTx.categoria_id,
+                    type: pendingTx.type,
+                    amount: pendingTx.monto,
+                    description: pendingTx.descripcion,
+                    transaction_date: pendingTx.fecha
+                });
+
+                saveLastTransaction(normalizedPhone, transaction);
+                clearPendingTransaction(normalizedPhone);
+
+                const tipoText = pendingTx.type === 'expense' ? 'gasto' : 'ingreso';
+                const emoji = pendingTx.type === 'expense' ? '💳' : '💰';
+                const response = `✅ ¡Listo! Registré tu ${tipoText} de $${transaction.amount}\n\n${emoji} ${transaction.description}\n📁 ${pendingTx.categoria}`;
+
+                await sendWhatsAppMessage(user_phone, response);
+                await saveChatMessage({
+                    user_phone: normalizedPhone,
+                    role: 'assistant',
+                    message: response,
+                    intent_json: null
+                });
+
+                console.log(`✅ Transacción confirmada: ${transaction.id}`);
+                return;
+            } else if (isCancel) {
+                clearPendingTransaction(normalizedPhone);
+                await sendWhatsAppMessage(user_phone, '❌ Transacción cancelada. No se guardó nada.');
+                console.log(`❌ Transacción pendiente cancelada para ${normalizedPhone}`);
+                return;
+            }
+        }
+
         // Verificar si estamos en contexto de edición (esperando un monto)
         const editingTransaction = getEditingContext(normalizedPhone);
         if (editingTransaction) {
@@ -166,8 +215,20 @@ async function processWhatsAppMessage(user_phone, message) {
         let response;
 
         switch (intent.action) {
+            case 'confirmar_transaccion':
+                result = await handleConfirmarTransaccion(normalizedPhone, user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'corregir_ultima_transaccion':
+                result = await handleCorregirUltimaTransaccion(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
             case 'registrar_transaccion':
                 result = await handleRegistrarTransaccion(normalizedPhone, intent.parameters);
+                // Guardar como última transacción para poder corregirla
+                saveLastTransaction(normalizedPhone, result);
                 response = await generateNaturalResponse({
                     action: 'registrar_transaccion',
                     result,
@@ -276,6 +337,119 @@ async function processWhatsAppMessage(user_phone, message) {
 // ==========================================
 // Handlers (copiados de chatController.js)
 // ==========================================
+
+/**
+ * Prepara una transacción para confirmación con botones interactivos de WhatsApp
+ */
+async function handleConfirmarTransaccion(normalizedPhone, user_phone, params) {
+    const { tipo, monto, descripcion, categoria, fecha } = params;
+    const type = tipo === 'gasto' ? 'expense' : 'income';
+
+    let category = await getCategoryByName(categoria);
+    if (!category) {
+        category = await suggestCategory(descripcion, type);
+    }
+
+    const transactionDate = fecha || getTodayMexico();
+
+    const pendingData = {
+        tipo,
+        monto,
+        descripcion,
+        categoria: category.name,
+        categoria_id: category.id,
+        fecha: transactionDate,
+        type
+    };
+
+    savePendingTransaction(normalizedPhone, pendingData);
+
+    const [year, month, day] = transactionDate.split('-');
+    const displayDate = `${day}/${month}`;
+    const emoji = type === 'expense' ? '💳' : '💰';
+
+    const body = `📝 ¿Confirmas esta transacción?
+
+${emoji} *$${monto.toFixed(2)}*
+📁 ${category.name}
+📝 ${descripcion}
+📅 ${displayDate}`;
+
+    // Enviar botones interactivos de WhatsApp
+    const buttons = [
+        { id: 'confirm_pending', title: '✅ Confirmar' },
+        { id: 'cancel_pending', title: '❌ Cancelar' }
+    ];
+
+    await sendInteractiveButtons(user_phone, body, buttons);
+
+    return {
+        response: null // Ya enviamos los botones directamente
+    };
+}
+
+/**
+ * Corrige un campo de la última transacción registrada
+ */
+async function handleCorregirUltimaTransaccion(normalizedPhone, params) {
+    const { campo, nuevo_valor_categoria, nuevo_valor_monto, nuevo_valor_descripcion, nuevo_valor_fecha } = params;
+
+    const lastTx = getLastTransaction(normalizedPhone);
+    if (!lastTx) {
+        return {
+            response: '🤔 No encuentro ninguna transacción reciente para corregir. Las transacciones solo se pueden corregir dentro de los primeros 10 minutos.'
+        };
+    }
+
+    const updateData = {};
+    let fieldName;
+    let newValue;
+
+    switch (campo) {
+        case 'categoria':
+            const category = await getCategoryByName(nuevo_valor_categoria);
+            if (!category) {
+                return {
+                    response: `❌ No encontré la categoría "${nuevo_valor_categoria}". Escribe "qué categorías existen" para ver todas.`
+                };
+            }
+            updateData.category_id = category.id;
+            fieldName = 'la categoría';
+            newValue = category.name;
+            break;
+
+        case 'monto':
+            updateData.amount = nuevo_valor_monto;
+            fieldName = 'el monto';
+            newValue = `$${nuevo_valor_monto}`;
+            break;
+
+        case 'descripcion':
+            updateData.description = nuevo_valor_descripcion;
+            fieldName = 'la descripción';
+            newValue = nuevo_valor_descripcion;
+            break;
+
+        case 'fecha':
+            updateData.transaction_date = nuevo_valor_fecha;
+            fieldName = 'la fecha';
+            const [year, month, day] = nuevo_valor_fecha.split('-');
+            newValue = `${day}/${month}/${year}`;
+            break;
+
+        default:
+            return {
+                response: '❌ No reconozco ese campo. Puedes corregir: categoría, monto, descripción o fecha.'
+            };
+    }
+
+    const updatedTransaction = await updateTransaction(lastTx.id, normalizedPhone, updateData);
+    saveLastTransaction(normalizedPhone, updatedTransaction);
+
+    return {
+        response: `✅ Listo, actualicé ${fieldName} a: *${newValue}*\n\n${updatedTransaction.description} - $${updatedTransaction.amount}`
+    };
+}
 
 async function handleRegistrarTransaccion(user_phone, params) {
     const { tipo, monto, descripcion, categoria, fecha } = params;
@@ -665,6 +839,59 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
         const transactionId = parseInt(transactionIdStr, 10);
 
         switch (action) {
+            case 'confirm':
+                // Manejar confirmación de transacción pendiente
+                if (replyId === 'confirm_pending') {
+                    const pendingTx = getPendingTransaction(normalizedPhone);
+
+                    if (!pendingTx) {
+                        await sendWhatsAppMessage(user_phone, '⏰ La confirmación expiró (5 min). Por favor registra la transacción de nuevo.');
+                        return;
+                    }
+
+                    // Crear transacción
+                    const transaction = await createTransaction({
+                        user_phone: normalizedPhone,
+                        category_id: pendingTx.categoria_id,
+                        type: pendingTx.type,
+                        amount: pendingTx.monto,
+                        description: pendingTx.descripcion,
+                        transaction_date: pendingTx.fecha
+                    });
+
+                    saveLastTransaction(normalizedPhone, transaction);
+                    clearPendingTransaction(normalizedPhone);
+
+                    const tipoText = pendingTx.type === 'expense' ? 'gasto' : 'ingreso';
+                    const emoji = pendingTx.type === 'expense' ? '💳' : '💰';
+                    await sendWhatsAppMessage(
+                        user_phone,
+                        `✅ ¡Listo! Registré tu ${tipoText} de $${transaction.amount}\n\n${emoji} ${transaction.description}\n📁 ${pendingTx.categoria}`
+                    );
+                    console.log(`✅ Transacción confirmada vía botón: ${transaction.id}`);
+                    return;
+                }
+
+                // Confirmación de eliminación (ya existente)
+                if (replyId.includes('delete')) {
+                    await processDeleteConfirmation(user_phone, normalizedPhone, transactionId);
+                }
+                break;
+
+            case 'cancel':
+                // Cancelar transacción pendiente
+                if (replyId === 'cancel_pending') {
+                    clearPendingTransaction(normalizedPhone);
+                    await sendWhatsAppMessage(user_phone, '❌ Transacción cancelada. No se guardó nada.');
+                    console.log(`❌ Transacción pendiente cancelada vía botón para ${normalizedPhone}`);
+                    return;
+                }
+
+                // Cancelar eliminación (ya existente)
+                clearContext(normalizedPhone);
+                await sendWhatsAppMessage(user_phone, '❌ Operación cancelada.');
+                break;
+
             case 'view':
                 // Usuario seleccionó una transacción, mostrar botones de editar/eliminar
                 const transaction = getTransactionById(normalizedPhone, transactionId);
