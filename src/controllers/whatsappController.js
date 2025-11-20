@@ -9,8 +9,9 @@ import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
-import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction } from '../services/contextService.js';
+import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction, savePendingAudio, getPendingAudio, clearPendingAudio } from '../services/contextService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
+import { transcribeAudio, isSupportedAudioFormat } from '../services/audioTranscriptionService.js';
 import {
     saveTransactionContext,
     getTransactionById,
@@ -90,6 +91,15 @@ export async function receiveWebhook(req, res) {
             // Procesar imagen de forma asíncrona
             processImageMessage(phone, mediaId, messageId).catch(err => {
                 console.error('❌ Error procesando imagen de WhatsApp:', err);
+            });
+        } else if (type === 'audio' || type === 'voice') {
+            const { mediaId, mimeType } = messageData;
+            const audioType = type === 'voice' ? 'nota de voz' : 'audio';
+            console.log(`🎙️ ${audioType} recibido de ${phone}, MIME: ${mimeType}`);
+
+            // Procesar audio de forma asíncrona
+            processAudioMessage(phone, mediaId, mimeType, messageId).catch(err => {
+                console.error('❌ Error procesando audio de WhatsApp:', err);
             });
         } else if (type === 'interactive_reply') {
             const { replyId, replyTitle } = messageData;
@@ -840,6 +850,24 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
 
         switch (action) {
             case 'confirm':
+                // Manejar confirmación de audio transcrito
+                if (replyId === 'confirm_audio') {
+                    const pendingAudio = getPendingAudio(normalizedPhone);
+
+                    if (!pendingAudio) {
+                        await sendWhatsAppMessage(user_phone, '⏰ La confirmación expiró (10 min). Por favor envía el audio de nuevo.');
+                        return;
+                    }
+
+                    // Limpiar contexto de audio
+                    clearPendingAudio(normalizedPhone);
+
+                    // Procesar el texto transcrito como si fuera un mensaje normal
+                    console.log(`✅ Audio confirmado, procesando: "${pendingAudio.text}"`);
+                    await processWhatsAppMessage(user_phone, pendingAudio.text);
+                    return;
+                }
+
                 // Manejar confirmación de transacción pendiente
                 if (replyId === 'confirm_pending') {
                     const pendingTx = getPendingTransaction(normalizedPhone);
@@ -879,6 +907,14 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
                 break;
 
             case 'cancel':
+                // Cancelar audio pendiente
+                if (replyId === 'cancel_audio') {
+                    clearPendingAudio(normalizedPhone);
+                    await sendWhatsAppMessage(user_phone, '❌ Audio cancelado. No se procesó nada.');
+                    console.log(`❌ Audio pendiente cancelado vía botón para ${normalizedPhone}`);
+                    return;
+                }
+
                 // Cancelar transacción pendiente
                 if (replyId === 'cancel_pending') {
                     clearPendingTransaction(normalizedPhone);
@@ -1144,6 +1180,79 @@ async function processImageMessage(user_phone, mediaId, messageId) {
         await sendWhatsAppMessage(
             user_phone,
             'Lo siento, tuve un problema procesando la imagen. ¿Puedes intentar de nuevo o decirme el gasto manualmente?'
+        );
+    }
+}
+
+/**
+ * Procesa un mensaje de audio/voz (transcripción con Whisper)
+ */
+async function processAudioMessage(user_phone, mediaId, mimeType, messageId) {
+    try {
+        console.log(`🎙️ Procesando audio de ${user_phone}`);
+
+        // Crear o obtener usuario
+        const user = await getOrCreateUser(user_phone);
+        const normalizedPhone = user.phone;
+
+        // Enviar mensaje de "procesando"
+        await sendWhatsAppMessage(user_phone, '🎙️ Escuchando tu audio, un momento...');
+
+        // Descargar audio
+        console.log('📥 Descargando audio de WhatsApp...');
+        const media = await downloadWhatsAppMedia(mediaId);
+
+        // Verificar formato soportado
+        if (!isSupportedAudioFormat(mimeType)) {
+            console.error(`❌ Formato de audio no soportado: ${mimeType}`);
+            await sendWhatsAppMessage(
+                user_phone,
+                '😕 Lo siento, ese formato de audio no es soportado. Intenta con un formato común (mp3, ogg, wav).'
+            );
+            return;
+        }
+
+        // Transcribir con Whisper
+        console.log('🔊 Transcribiendo audio con Whisper...');
+        const transcriptionResult = await transcribeAudio(media.buffer, mimeType);
+
+        if (!transcriptionResult.success || !transcriptionResult.text) {
+            console.error('❌ Transcripción falló:', transcriptionResult.error);
+            await sendWhatsAppMessage(
+                user_phone,
+                '😕 No pude entender el audio. ¿Puedes intentar de nuevo o escribirlo?'
+            );
+            return;
+        }
+
+        const transcribedText = transcriptionResult.text;
+        console.log(`✅ Audio transcrito: "${transcribedText}"`);
+
+        // Guardar en contexto pendiente
+        savePendingAudio(normalizedPhone, {
+            text: transcribedText,
+            mediaId,
+            messageId
+        });
+
+        // Enviar confirmación con botones
+        await sendInteractiveButtons(
+            user_phone,
+            `🎤 Entendí:\n\n*"${transcribedText}"*\n\n¿Quieres que lo procese?`,
+            [
+                { id: 'confirm_audio', title: '✅ Sí, procesar' },
+                { id: 'cancel_audio', title: '❌ Cancelar' }
+            ]
+        );
+
+        console.log(`✅ Audio transcrito y esperando confirmación de ${normalizedPhone}`);
+
+    } catch (error) {
+        console.error('❌ Error procesando audio de WhatsApp:', error);
+
+        await sendWhatsAppMessage(
+            user_phone,
+            'Lo siento, tuve un problema procesando el audio. ¿Puedes intentar de nuevo o escribirlo manualmente?'
         );
     }
 }

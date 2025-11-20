@@ -5,13 +5,14 @@
 
 import { parseIntent, generateNaturalResponse } from '../services/openaiService.js';
 import { getOrCreateUser } from '../services/userService.js';
-import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
-import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
+import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction, moveTransactionsBetweenCategories } from '../services/transactionService.js';
+import { getCategoryByName, suggestCategory, getAllCategories, createCategory, updateCategory, deleteCategory } from '../services/categoryService.js';
 import { saveChatMessage, getChatHistory } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber, getPendingReceipt, savePendingReceipt, clearPendingReceipt, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction } from '../services/contextService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
 import { saveReceiptImage } from '../services/receiptService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
+import { selectIcon, selectColor } from '../utils/iconMapper.js';
 
 /**
  * Procesa un mensaje del usuario
@@ -216,6 +217,26 @@ export async function processMessage(req, res) {
 
             case 'consultar_categorias':
                 result = await handleConsultarCategorias(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'crear_categoria':
+                result = await handleCrearCategoria(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'editar_categoria':
+                result = await handleEditarCategoria(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'eliminar_categoria':
+                result = await handleEliminarCategoria(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'mover_transacciones_categoria':
+                result = await handleMoverTransacciones(user_phone, intent.parameters);
                 response = result.response;
                 break;
 
@@ -522,10 +543,21 @@ async function handleConsultarCategorias(params) {
     const { tipo_categoria = 'todas' } = params;
     const categories = await getAllCategories();
 
+    // Las primeras 13 categorías son predefinidas (9 gastos + 4 ingresos)
+    const predefinedCategoryNames = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
+        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+    ];
+
     let filteredCategories;
     let tipoTexto;
 
-    if (tipo_categoria === 'gasto') {
+    if (tipo_categoria === 'personalizadas') {
+        // Solo categorías personalizadas (las que no están en la lista predefinida)
+        filteredCategories = categories.filter(c => !predefinedCategoryNames.includes(c.name));
+        tipoTexto = 'personalizadas';
+    } else if (tipo_categoria === 'gasto') {
         filteredCategories = categories.filter(c => c.type === 'expense');
         tipoTexto = 'gastos';
     } else if (tipo_categoria === 'ingreso') {
@@ -534,6 +566,14 @@ async function handleConsultarCategorias(params) {
     } else {
         filteredCategories = categories;
         tipoTexto = 'disponibles';
+    }
+
+    // Si solo son personalizadas y no hay ninguna
+    if (tipo_categoria === 'personalizadas' && filteredCategories.length === 0) {
+        return {
+            categories: [],
+            response: 'Aún no has creado categorías personalizadas. Puedes crear una diciendo: "crea una categoría de gastos llamada Mascotas" 🐶'
+        };
     }
 
     const expenseCategories = filteredCategories
@@ -548,20 +588,284 @@ async function handleConsultarCategorias(params) {
 
     let response = `Estas son las categorías ${tipoTexto}:\n\n`;
 
-    if (tipo_categoria === 'todas' || tipo_categoria === 'gasto') {
-        response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
+    if (tipo_categoria === 'todas' || tipo_categoria === 'gasto' || tipo_categoria === 'personalizadas') {
+        if (expenseCategories) {
+            response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
+        }
     }
 
-    if (tipo_categoria === 'todas' || tipo_categoria === 'ingreso') {
-        response += `💰 *INGRESOS:*\n${incomeCategories}\n\n`;
+    if (tipo_categoria === 'todas' || tipo_categoria === 'ingreso' || tipo_categoria === 'personalizadas') {
+        if (incomeCategories) {
+            response += `💰 *INGRESOS:*\n${incomeCategories}\n\n`;
+        }
     }
 
-    response += 'Puedes usarlas para registrar tus transacciones. Ejemplo: "gasté 500 en comida" 💳';
+    if (tipo_categoria === 'personalizadas') {
+        response += `Tienes ${filteredCategories.length} categoría${filteredCategories.length > 1 ? 's' : ''} personalizada${filteredCategories.length > 1 ? 's' : ''}. Puedes crear más diciendo: "crea categoría Gimnasio" 💪`;
+    } else {
+        response += 'Puedes usarlas para registrar tus transacciones. Ejemplo: "gasté 500 en comida" 💳';
+    }
 
     return {
         categories: filteredCategories,
         response
     };
+}
+
+/**
+ * Maneja la creación de una categoría personalizada
+ */
+async function handleCrearCategoria(params) {
+    const { nombre, tipo } = params;
+
+    // Convertir tipo a formato de BD
+    const type = tipo === 'gasto' ? 'expense' : 'income';
+
+    // Verificar si la categoría ya existe
+    const existing = await getCategoryByName(nombre);
+    if (existing) {
+        return {
+            response: `Ya existe una categoría llamada "${nombre}". ¿Quieres usar otro nombre?`
+        };
+    }
+
+    // Seleccionar icono y color automáticamente
+    const icon = selectIcon(nombre, type);
+    const color = selectColor(type);
+
+    try {
+        // Crear la categoría
+        const newCategory = await createCategory({
+            name: nombre,
+            type: type,
+            color: color,
+            icon: icon
+        });
+
+        const tipoTexto = tipo === 'gasto' ? 'gastos' : 'ingresos';
+        const response = `✅ ¡Listo! Creé la categoría "${nombre}" ${icon} para ${tipoTexto}. Ya puedes usarla en tus transacciones.`;
+
+        return {
+            category: newCategory,
+            response
+        };
+    } catch (error) {
+        console.error('Error creando categoría:', error);
+
+        // Manejar error de nombre duplicado
+        if (error.message.includes('duplicate') || error.message.includes('unique')) {
+            return {
+                response: `Ya existe una categoría con el nombre "${nombre}". ¿Quieres usar otro nombre?`
+            };
+        }
+
+        return {
+            response: `❌ Error al crear la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la edición de una categoría personalizada
+ */
+async function handleEditarCategoria(params) {
+    const { nombre_actual, nombre_nuevo, color_nuevo, icono_nuevo } = params;
+
+    // Buscar la categoría actual
+    const category = await getCategoryByName(nombre_actual);
+    if (!category) {
+        return {
+            response: `No encontré ninguna categoría llamada "${nombre_actual}". ¿Quieres verificar el nombre?`
+        };
+    }
+
+    // Validar que sea una categoría personalizada
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
+        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        return {
+            response: `No puedo editar "${category.name}" porque es una categoría predefinida. Solo puedes editar categorías personalizadas.`
+        };
+    }
+
+    try {
+        // Preparar datos de actualización
+        const updateData = {};
+        if (nombre_nuevo) updateData.name = nombre_nuevo;
+        if (color_nuevo) updateData.color = color_nuevo;
+        if (icono_nuevo !== undefined) updateData.icon = icono_nuevo;
+
+        // Actualizar categoría
+        const updated = await updateCategory(category.id, updateData);
+
+        // Generar respuesta según lo que se cambió
+        const changes = [];
+        if (nombre_nuevo) changes.push(`nombre a "${nombre_nuevo}"`);
+        if (color_nuevo) changes.push('color');
+        if (icono_nuevo !== undefined) changes.push('icono');
+
+        const changesText = changes.join(', ');
+        const response = `✅ Listo! Actualicé ${changesText} de la categoría ${updated.icon ? updated.icon : ''} "${updated.name}".`;
+
+        return {
+            category: updated,
+            response
+        };
+    } catch (error) {
+        console.error('Error editando categoría:', error);
+
+        if (error.message.includes('Ya existe')) {
+            return {
+                response: `Ya existe una categoría con el nombre "${nombre_nuevo}". ¿Quieres usar otro nombre?`
+            };
+        }
+
+        return {
+            response: `❌ Error al editar la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la eliminación de una categoría personalizada
+ */
+async function handleEliminarCategoria(params) {
+    const { nombre } = params;
+
+    // Buscar la categoría
+    const category = await getCategoryByName(nombre);
+    if (!category) {
+        return {
+            response: `No encontré ninguna categoría llamada "${nombre}". ¿Quieres verificar el nombre?`
+        };
+    }
+
+    // Validar que sea una categoría personalizada
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
+        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        return {
+            response: `No puedo eliminar "${category.name}" porque es una categoría predefinida del sistema.`
+        };
+    }
+
+    try {
+        // Eliminar categoría
+        const result = await deleteCategory(category.id);
+
+        let response;
+        if (result.movedTransactions > 0) {
+            response = `✅ Categoría "${result.deleted.name}" eliminada. ${result.movedTransactions} transacción${result.movedTransactions > 1 ? 'es' : ''} ${result.movedTransactions > 1 ? 'fueron movidas' : 'fue movida'} a "${result.movedTo}".`;
+        } else {
+            response = `✅ Categoría "${result.deleted.name}" eliminada correctamente.`;
+        }
+
+        return {
+            result,
+            response
+        };
+    } catch (error) {
+        console.error('Error eliminando categoría:', error);
+        return {
+            response: `❌ Error al eliminar la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja el movimiento de transacciones entre categorías
+ */
+async function handleMoverTransacciones(user_phone, params) {
+    const { categoria_origen, categoria_destino, tipo } = params;
+
+    // Convertir tipo a formato de BD
+    const type = tipo === 'gasto' ? 'expense' : 'income';
+
+    try {
+        // Buscar categoría origen
+        const fromCategory = await getCategoryByName(categoria_origen);
+        if (!fromCategory) {
+            return {
+                response: `No encontré ninguna categoría llamada "${categoria_origen}". ¿Quieres verificar el nombre?`
+            };
+        }
+
+        // Verificar que el tipo coincida
+        if (fromCategory.type !== type) {
+            const expectedType = fromCategory.type === 'expense' ? 'gastos' : 'ingresos';
+            return {
+                response: `La categoría "${categoria_origen}" es de ${expectedType}, no de ${tipo === 'gasto' ? 'gastos' : 'ingresos'}.`
+            };
+        }
+
+        // Buscar o crear categoría destino
+        let toCategory = await getCategoryByName(categoria_destino);
+
+        if (!toCategory) {
+            // Crear la categoría destino automáticamente
+            const icon = selectIcon(categoria_destino, type);
+            const color = selectColor(type);
+
+            toCategory = await createCategory({
+                name: categoria_destino,
+                type: type,
+                color: color,
+                icon: icon
+            });
+
+            console.log(`✨ Categoría "${categoria_destino}" creada automáticamente`);
+        } else {
+            // Verificar que el tipo coincida
+            if (toCategory.type !== type) {
+                const expectedType = toCategory.type === 'expense' ? 'gastos' : 'ingresos';
+                return {
+                    response: `La categoría destino "${categoria_destino}" es de ${expectedType}, no de ${tipo === 'gasto' ? 'gastos' : 'ingresos'}. No puedo mover transacciones entre tipos diferentes.`
+                };
+            }
+        }
+
+        // Mover las transacciones
+        const result = await moveTransactionsBetweenCategories(
+            fromCategory.id,
+            toCategory.id,
+            user_phone
+        );
+
+        // Generar respuesta
+        let response;
+        if (result.movedCount === 0) {
+            response = `No encontré transacciones en la categoría "${categoria_origen}" para mover.`;
+        } else {
+            const wasCreated = !toCategory || toCategory.id === result.toCategoryId;
+            const creationMsg = wasCreated ? ` (categoría creada automáticamente ${toCategory.icon})` : '';
+
+            response = `✅ Listo! Moví ${result.movedCount} transacción${result.movedCount > 1 ? 'es' : ''} de "${categoria_origen}" a "${categoria_destino}"${creationMsg}.`;
+        }
+
+        return {
+            result: {
+                ...result,
+                categoryCreated: !toCategory,
+                fromCategoryName: fromCategory.name,
+                toCategoryName: toCategory.name
+            },
+            response
+        };
+
+    } catch (error) {
+        console.error('Error moviendo transacciones:', error);
+        return {
+            response: `❌ Error al mover transacciones: ${error.message}`
+        };
+    }
 }
 
 /**
@@ -617,6 +921,12 @@ Puedo ayudarte a:
 • "Elimina el 1"
 • "Cambia el 2 a $600"
 
+🏷️ *CREAR CATEGORÍAS PERSONALIZADAS:*
+¡Sí! Puedes crear tus propias categorías. Solo dime:
+• "Crea una categoría de gastos llamada Mascotas"
+• "Crea categoría Freelance de ingresos"
+Yo elegiré automáticamente el icono más apropiado.
+
 💡 Di "qué categorías existen" para ver todas las opciones.
 
 ¿En qué te ayudo?`;
@@ -640,7 +950,22 @@ function handleConversacionGeneral(params) {
             return '¡De nada! Estoy aquí para ayudarte con tus finanzas.';
 
         default:
-            return '¿En qué puedo ayudarte hoy?';
+            // Respuesta mejorada para preguntas generales
+            return `¡Claro! Puedo ayudarte con:
+
+📊 *Registrar* gastos e ingresos
+💰 *Consultar* tu estado financiero
+📋 *Ver* listas de transacciones
+✏️ *Editar* o *eliminar* transacciones
+🏷️ *Crear categorías personalizadas*
+
+Ejemplos:
+• "Gasté 500 en tacos"
+• "¿Cómo voy este mes?"
+• "Crea categoría Mascotas de gastos"
+• "¿Qué categorías personalizadas tengo?"
+
+¿Qué quieres hacer?`;
     }
 }
 

@@ -224,6 +224,57 @@ export function clearLastTransaction(userPhone) {
     }
 }
 
+/**
+ * Guarda un audio pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @param {object} audioData - Datos del audio pendiente (texto transcrito, etc.)
+ */
+export function savePendingAudio(userPhone, audioData) {
+    const context = userContext.get(userPhone) || {};
+    context.pendingAudio = {
+        ...audioData,
+        timestamp: new Date()
+    };
+    userContext.set(userPhone, context);
+}
+
+/**
+ * Obtiene el audio pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ * @returns {object|null} Audio pendiente o null
+ */
+export function getPendingAudio(userPhone) {
+    const context = userContext.get(userPhone);
+
+    if (!context || !context.pendingAudio) {
+        return null;
+    }
+
+    // Verificar que el contexto no sea muy viejo (más de 10 minutos)
+    const now = new Date();
+    const diff = now - context.pendingAudio.timestamp;
+    const minutes = diff / 1000 / 60;
+
+    if (minutes > 10) {
+        // Contexto expirado
+        delete context.pendingAudio;
+        return null;
+    }
+
+    return context.pendingAudio;
+}
+
+/**
+ * Limpia el audio pendiente de confirmación
+ * @param {string} userPhone - Teléfono del usuario
+ */
+export function clearPendingAudio(userPhone) {
+    const context = userContext.get(userPhone);
+    if (context) {
+        delete context.pendingAudio;
+    }
+}
+
 export default {
     saveTransactionList,
     getTransactionByNumber,
@@ -237,5 +288,8 @@ export default {
     clearPendingTransaction,
     saveLastTransaction,
     getLastTransaction,
+    savePendingAudio,
+    getPendingAudio,
+    clearPendingAudio,
     clearLastTransaction
 };

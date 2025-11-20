@@ -220,6 +220,36 @@ export function extractMessageFromWebhook(webhookBody) {
             };
         }
 
+        if (message.type === 'audio') {
+            const mediaId = message.audio.id;
+            const mimeType = message.audio.mime_type || 'audio/ogg';
+
+            console.log(`🎙️ Mensaje de audio recibido de ${phone}, Media ID: ${mediaId}, Type: ${mimeType}`);
+
+            return {
+                type: 'audio',
+                phone,
+                messageId,
+                mediaId,
+                mimeType
+            };
+        }
+
+        if (message.type === 'voice') {
+            const mediaId = message.voice.id;
+            const mimeType = message.voice.mime_type || 'audio/ogg; codecs=opus';
+
+            console.log(`🎤 Nota de voz recibida de ${phone}, Media ID: ${mediaId}, Type: ${mimeType}`);
+
+            return {
+                type: 'voice',
+                phone,
+                messageId,
+                mediaId,
+                mimeType
+            };
+        }
+
         if (message.type === 'interactive') {
             const interactiveType = message.interactive.type;
 

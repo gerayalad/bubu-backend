@@ -6,6 +6,7 @@
 import openai from '../config/openai.js';
 import { getAllCategories } from './categoryService.js';
 import { getTodayMexico } from '../utils/dateUtils.js';
+import { selectIcon, selectColor } from '../utils/iconMapper.js';
 
 /**
  * Define las funciones que OpenAI puede invocar
@@ -151,16 +152,98 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'consultar_categorias',
-            description: 'Lista las categorías disponibles. Usa esta cuando el usuario pregunte "qué categorías hay", "qué categorías existen", "en qué puedo gastar", "cuáles son las categorías", etc.',
+            description: 'Lista las categorías disponibles. Usa esta cuando el usuario pregunte "qué categorías hay", "qué categorías existen", "en qué puedo gastar", "cuáles son las categorías", "qué categorías personalizadas tengo", "muestra mis categorías", etc.',
             parameters: {
                 type: 'object',
                 properties: {
                     tipo_categoria: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso', 'todas'],
-                        description: 'Tipo de categorías a mostrar. "todas" por defecto.'
+                        enum: ['gasto', 'ingreso', 'todas', 'personalizadas'],
+                        description: 'Tipo de categorías a mostrar. "todas" muestra todas las categorías (predefinidas y personalizadas), "personalizadas" solo las creadas por el usuario, "gasto" solo categorías de gastos, "ingreso" solo categorías de ingresos.'
                     }
                 }
+            }
+        },
+        {
+            name: 'crear_categoria',
+            description: 'Crea una nueva categoría personalizada. Usa esta cuando el usuario pida explícitamente crear una categoría nueva. Ejemplos: "crea una categoría de gastos llamada Mascotas", "crea categoría Freelance de ingresos", "nueva categoría Cafetería para gastos".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    nombre: {
+                        type: 'string',
+                        description: 'Nombre de la nueva categoría según lo que dijo el usuario'
+                    },
+                    tipo: {
+                        type: 'string',
+                        enum: ['gasto', 'ingreso'],
+                        description: 'Tipo de categoría: "gasto" para categorías de gastos, "ingreso" para categorías de ingresos'
+                    }
+                },
+                required: ['nombre', 'tipo']
+            }
+        },
+        {
+            name: 'editar_categoria',
+            description: 'Edita una categoría personalizada existente (nombre, color o icono). Usa esta cuando el usuario pida cambiar/editar/renombrar una categoría. Ejemplos: "cambia el nombre de la categoría AI Tools a HappyToHelp", "renombra la categoría Mascotas a Pets", "cambia el color de la categoría Freelance".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    nombre_actual: {
+                        type: 'string',
+                        description: 'Nombre actual de la categoría a editar'
+                    },
+                    nombre_nuevo: {
+                        type: 'string',
+                        description: 'Nuevo nombre para la categoría (opcional si solo se cambia color/icono)'
+                    },
+                    color_nuevo: {
+                        type: 'string',
+                        description: 'Nuevo color en formato hexadecimal (opcional)'
+                    },
+                    icono_nuevo: {
+                        type: 'string',
+                        description: 'Nuevo icono/emoji (opcional)'
+                    }
+                },
+                required: ['nombre_actual']
+            }
+        },
+        {
+            name: 'eliminar_categoria',
+            description: 'Elimina una categoría personalizada. Las transacciones asociadas se moverán automáticamente a "Otros Gastos" u "Otros Ingresos". Usa esta cuando el usuario pida eliminar/borrar una categoría. Ejemplos: "elimina la categoría AI Tools", "borra la categoría Mascotas", "quita la categoría Freelance".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    nombre: {
+                        type: 'string',
+                        description: 'Nombre de la categoría a eliminar'
+                    }
+                },
+                required: ['nombre']
+            }
+        },
+        {
+            name: 'mover_transacciones_categoria',
+            description: 'Mueve todas las transacciones de una categoría a otra. Si la categoría destino no existe, se creará automáticamente. Usa esta cuando el usuario pida mover/cambiar/pasar transacciones de una categoría a otra. Ejemplos: "mueve todos los gastos de Entretenimiento a Casino", "pasa las transacciones de Comida a Restaurantes", "cambia todos los gastos de AI Tools a HappyToHelp".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    categoria_origen: {
+                        type: 'string',
+                        description: 'Nombre de la categoría de donde se moverán las transacciones'
+                    },
+                    categoria_destino: {
+                        type: 'string',
+                        description: 'Nombre de la categoría a donde se moverán las transacciones'
+                    },
+                    tipo: {
+                        type: 'string',
+                        enum: ['gasto', 'ingreso'],
+                        description: 'Tipo de transacciones a mover (gasto o ingreso). Infiere del contexto.'
+                    }
+                },
+                required: ['categoria_origen', 'categoria_destino', 'tipo']
             }
         },
         {
@@ -359,6 +442,12 @@ Tu trabajo es interpretar los mensajes del usuario y determinar qué acción qui
 
 Fecha actual: ${today}
 
+IMPORTANTE - Cuando el usuario pregunte sobre capacidades:
+- "¿Puedes crear categorías?" → usa ayuda_uso (tipo_ayuda: general)
+- "¿Qué puedes hacer?" → usa ayuda_uso (tipo_ayuda: general)
+- "¿Cómo funciona?" → usa ayuda_uso (tipo_ayuda: general)
+El sistema responderá afirmativamente y explicará cómo usar la funcionalidad.
+
 IMPORTANTE - Interpretación de periodos temporales:
 - "este mes", "mes actual", "en lo que va del mes", "cuánto llevo gastado" → periodo: mes_actual
 - "mes pasado", "el mes pasado", "mes anterior", "mes que pasó" → periodo: mes_pasado
@@ -419,12 +508,42 @@ CONSULTAR CATEGORÍAS:
 - "¿en qué puedo gastar?" → consultar_categorias (tipo_categoria: gasto)
 - "¿cuáles son las categorías de ingresos?" → consultar_categorias (tipo_categoria: ingreso)
 - "muéstrame las categorías" → consultar_categorias (tipo_categoria: todas)
+- "¿qué categorías personalizadas tengo?" → consultar_categorias (tipo_categoria: personalizadas)
+- "muestra mis categorías" → consultar_categorias (tipo_categoria: personalizadas)
+
+CREAR CATEGORÍAS PERSONALIZADAS:
+- "crea una categoría de gastos llamada Mascotas" → crear_categoria (nombre: Mascotas, tipo: gasto)
+- "crea categoría Freelance de ingresos" → crear_categoria (nombre: Freelance, tipo: ingreso)
+- "nueva categoría Cafetería para gastos" → crear_categoria (nombre: Cafetería, tipo: gasto)
+- "crea categoría gimnasio" → crear_categoria (nombre: Gimnasio, tipo: gasto)
+- "quiero una categoría de ingresos que se llame Propinas" → crear_categoria (nombre: Propinas, tipo: ingreso)
+
+EDITAR CATEGORÍAS PERSONALIZADAS:
+- "cambia el nombre de la categoría AI Tools a HappyToHelp" → editar_categoria (nombre_actual: AI Tools, nombre_nuevo: HappyToHelp)
+- "renombra la categoría Mascotas a Pets" → editar_categoria (nombre_actual: Mascotas, nombre_nuevo: Pets)
+- "cambia el nombre de AI Tools por HappyToHelp" → editar_categoria (nombre_actual: AI Tools, nombre_nuevo: HappyToHelp)
+- "edita la categoría Freelance y ponle el nombre Trabajo Remoto" → editar_categoria (nombre_actual: Freelance, nombre_nuevo: Trabajo Remoto)
+
+ELIMINAR CATEGORÍAS PERSONALIZADAS:
+- "elimina la categoría AI Tools" → eliminar_categoria (nombre: AI Tools)
+- "borra la categoría Mascotas" → eliminar_categoria (nombre: Mascotas)
+- "quita la categoría Freelance" → eliminar_categoria (nombre: Freelance)
+- "eliminar categoría Gimnasio" → eliminar_categoria (nombre: Gimnasio)
+
+MOVER TRANSACCIONES ENTRE CATEGORÍAS:
+- "mueve todos los gastos de Entretenimiento a Casino" → mover_transacciones_categoria (categoria_origen: Entretenimiento, categoria_destino: Casino, tipo: gasto)
+- "pasa las transacciones de Comida a Restaurantes" → mover_transacciones_categoria (categoria_origen: Comida, categoria_destino: Restaurantes, tipo: gasto)
+- "cambia todos los gastos de AI Tools a HappyToHelp" → mover_transacciones_categoria (categoria_origen: AI Tools, categoria_destino: HappyToHelp, tipo: gasto)
+- "mueve los ingresos de Ventas a Freelance" → mover_transacciones_categoria (categoria_origen: Ventas, categoria_destino: Freelance, tipo: ingreso)
 
 AYUDA / INSTRUCCIONES:
 - "quiero registrar un gasto" → ayuda_uso (tipo_ayuda: registrar)
 - "¿cómo registro un gasto?" → ayuda_uso (tipo_ayuda: registrar)
 - "ayuda" → ayuda_uso (tipo_ayuda: general)
 - "¿qué puedes hacer?" → ayuda_uso (tipo_ayuda: general)
+- "¿puedes crear categorías?" → ayuda_uso (tipo_ayuda: general)
+- "¿se pueden crear categorías?" → ayuda_uso (tipo_ayuda: general)
+- "¿qué funcionalidades tienes?" → ayuda_uso (tipo_ayuda: general)
 - "¿cómo consulto mi estado?" → ayuda_uso (tipo_ayuda: consultar)
 - "¿cómo funciona esto?" → ayuda_uso (tipo_ayuda: general)
 

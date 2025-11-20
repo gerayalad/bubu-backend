@@ -56,6 +56,16 @@ ${expenseCategories}
 💵 *CATEGORÍAS DE INGRESOS:*
 ${incomeCategories}
 
+✨ *GESTIONAR CATEGORÍAS PERSONALIZADAS:*
+• "Crea una categoría de gastos llamada Mascotas"
+• "Crea categoría Freelance de ingresos"
+• "Cambia el nombre de la categoría AI Tools a HappyToHelp"
+• "Elimina la categoría Mascotas"
+• "Mueve todos los gastos de Entretenimiento a Casino"
+• "¿Qué categorías personalizadas tengo?"
+
+El asistente elegirá automáticamente el icono. Si la categoría destino no existe, se creará automáticamente.
+
 ✨ ¡Prueba ahora! Dime algo como: "Gasté 100 en café" 😊`;
 }
 
@@ -71,6 +81,9 @@ Puedes decirme cosas como:
 • "¿Cómo voy este mes?"
 • "Muestra mis gastos en comida"
 • "Elimina el 1"
+• "Crea categoría Mascotas de gastos"
+• "Cambia el nombre de AI Tools a HappyToHelp"
+• "Mueve todos los gastos de Entretenimiento a Casino"
 
 ¿Necesitas más ayuda? Escribe "tutorial" para ver la guía completa.`;
 }

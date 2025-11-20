@@ -104,10 +104,127 @@ export async function suggestCategory(description, type) {
     return await getCategoryByName(fallbackName);
 }
 
+/**
+ * Actualiza una categoría personalizada
+ * @param {number} id - ID de la categoría
+ * @param {object} data - Datos a actualizar (name, color, icon)
+ * @returns {object} Categoría actualizada
+ */
+export async function updateCategory(id, data) {
+    const { name, color, icon } = data;
+
+    // Verificar que la categoría existe
+    const category = await getCategoryById(id);
+    if (!category) {
+        throw new Error('Categoría no encontrada');
+    }
+
+    // Validar que no sea una categoría predefinida por nombre
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
+        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        throw new Error('No se pueden editar las categorías predefinidas');
+    }
+
+    // Si se está cambiando el nombre, verificar que no exista otra con ese nombre
+    if (name && name !== category.name) {
+        const existing = await getCategoryByName(name);
+        if (existing) {
+            throw new Error(`Ya existe una categoría con el nombre "${name}"`);
+        }
+    }
+
+    // Construir query de actualización
+    const updates = [];
+    const values = [];
+    let paramCount = 1;
+
+    if (name) {
+        updates.push(`name = $${paramCount++}`);
+        values.push(name);
+    }
+    if (color) {
+        updates.push(`color = $${paramCount++}`);
+        values.push(color);
+    }
+    if (icon !== undefined) {
+        updates.push(`icon = $${paramCount++}`);
+        values.push(icon);
+    }
+
+    if (updates.length === 0) {
+        throw new Error('No hay cambios para actualizar');
+    }
+
+    values.push(id);
+    const result = await execute(
+        `UPDATE categories SET ${updates.join(', ')} WHERE id = $${paramCount} RETURNING *`,
+        values
+    );
+
+    return result.rows[0];
+}
+
+/**
+ * Elimina una categoría personalizada
+ * Las transacciones asociadas se mueven a "Otros Gastos" u "Otros Ingresos"
+ * @param {number} id - ID de la categoría a eliminar
+ * @returns {object} Resultado de la eliminación
+ */
+export async function deleteCategory(id) {
+    // Verificar que la categoría existe
+    const category = await getCategoryById(id);
+    if (!category) {
+        throw new Error('Categoría no encontrada');
+    }
+
+    // Validar que no sea una categoría predefinida
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
+        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        throw new Error('No se pueden eliminar las categorías predefinidas');
+    }
+
+    // Determinar categoría de reemplazo según el tipo
+    const fallbackName = category.type === 'expense' ? 'Otros Gastos' : 'Otros Ingresos';
+    const fallbackCategory = await getCategoryByName(fallbackName);
+
+    if (!fallbackCategory) {
+        throw new Error('No se encontró la categoría de reemplazo');
+    }
+
+    // Mover todas las transacciones a la categoría de "Otros"
+    const updateResult = await execute(
+        'UPDATE transactions SET category_id = $1 WHERE category_id = $2',
+        [fallbackCategory.id, id]
+    );
+
+    const movedTransactions = updateResult.rowCount || 0;
+
+    // Eliminar la categoría
+    await execute('DELETE FROM categories WHERE id = $1', [id]);
+
+    return {
+        deleted: category,
+        movedTransactions,
+        movedTo: fallbackCategory.name
+    };
+}
+
 export default {
     getAllCategories,
     getCategoryById,
     getCategoryByName,
     createCategory,
+    updateCategory,
+    deleteCategory,
     suggestCategory
 };

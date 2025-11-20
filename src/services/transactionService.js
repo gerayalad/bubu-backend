@@ -244,11 +244,48 @@ export async function updateTransaction(id, user_phone, data) {
     return await getTransactionById(id);
 }
 
+/**
+ * Mueve todas las transacciones de una categoría a otra
+ * @param {number} fromCategoryId - ID de la categoría origen
+ * @param {number} toCategoryId - ID de la categoría destino
+ * @param {string} user_phone - Teléfono del usuario (opcional, si se especifica solo mueve sus transacciones)
+ * @returns {object} Resultado con cantidad de transacciones movidas
+ */
+export async function moveTransactionsBetweenCategories(fromCategoryId, toCategoryId, user_phone = null) {
+    // Validar que las categorías sean diferentes
+    if (fromCategoryId === toCategoryId) {
+        throw new Error('La categoría origen y destino no pueden ser la misma');
+    }
+
+    // Construir query según si hay filtro de usuario
+    let query, params;
+
+    if (user_phone) {
+        // Mover solo transacciones del usuario específico
+        query = 'UPDATE transactions SET category_id = $1 WHERE category_id = $2 AND user_phone = $3';
+        params = [toCategoryId, fromCategoryId, user_phone];
+    } else {
+        // Mover todas las transacciones de la categoría
+        query = 'UPDATE transactions SET category_id = $1 WHERE category_id = $2';
+        params = [toCategoryId, fromCategoryId];
+    }
+
+    const result = await execute(query, params);
+    const movedCount = result.rowCount || 0;
+
+    return {
+        movedCount,
+        fromCategoryId,
+        toCategoryId
+    };
+}
+
 export default {
     createTransaction,
     getTransactionById,
     getUserTransactions,
     getFinancialSummary,
     deleteTransaction,
-    updateTransaction
+    updateTransaction,
+    moveTransactionsBetweenCategories
 };
