@@ -194,10 +194,6 @@ export function extractMessageFromWebhook(webhookBody) {
         const phone = message.from;
         const messageId = message.id;
 
-        // DEBUG: Logging temporal para ver estructura del mensaje
-        console.log('🔍 DEBUG - Mensaje completo recibido:', JSON.stringify(message, null, 2));
-        console.log('🔍 DEBUG - Tipo de mensaje:', message.type);
-
         // Procesar según tipo de mensaje
         if (message.type === 'text') {
             const text = message.text.body;
