@@ -376,8 +376,9 @@ async function handleRegistrarTransaccion(user_phone, params) {
     }
 
     // ============ GASTO COMPARTIDO ============
-    if (es_compartido === true) {
-        console.log(`💑 Detectado gasto compartido: ${user_phone} | Pagó: ${quien_pago || 'yo'}`);
+    // Detectar si es compartido: es_compartido=true O si especificó quien_pago
+    if (es_compartido === true || quien_pago) {
+        console.log(`💑 Detectado gasto compartido: ${user_phone} | Pagó: ${quien_pago || 'yo'} | es_compartido: ${es_compartido}`);
 
         // Verificar que el usuario tenga pareja registrada
         const relationship = await getRelationship(user_phone);
