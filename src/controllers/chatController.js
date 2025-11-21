@@ -13,6 +13,10 @@ import { extractReceiptData, validateReceiptData } from '../services/ocrService.
 import { saveReceiptImage } from '../services/receiptService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
 import { selectIcon, selectColor } from '../utils/iconMapper.js';
+import { createRelationship, getRelationship, updateDefaultSplitByPhone, acceptRelationshipByPhone, rejectRelationshipByPhone, getPendingRequests } from '../services/relationshipService.js';
+import { createSharedTransaction, getSharedTransactions, getSplitInfo } from '../services/sharedTransactionService.js';
+import { calculateBalance, getSharedTransactionsForBalance } from '../services/balanceService.js';
+import { notifyRelationshipRequest, notifyRelationshipAccepted, notifyRelationshipRejected, notifyPartnerOfSharedExpense, notifyDivisionUpdated } from '../services/notificationService.js';
 
 /**
  * Procesa un mensaje del usuario
@@ -245,6 +249,36 @@ export async function processMessage(req, res) {
                 response = handleAyudaUso(intent.parameters);
                 break;
 
+            case 'registrar_pareja':
+                result = await handleRegistrarPareja(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'consultar_balance':
+                result = await handleConsultarBalance(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'listar_gastos_compartidos':
+                result = await handleListarGastosCompartidos(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'actualizar_division_default':
+                result = await handleActualizarDivisionDefault(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'aceptar_solicitud_pareja':
+                result = await handleAceptarSolicitudPareja(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'rechazar_solicitud_pareja':
+                result = await handleRechazarSolicitudPareja(user_phone, intent.parameters);
+                response = result.response;
+                break;
+
             case 'conversacion_general':
                 result = null;
                 response = handleConversacionGeneral(intent.parameters);
@@ -315,7 +349,10 @@ export async function processMessage(req, res) {
  * Maneja el registro de una transacción
  */
 async function handleRegistrarTransaccion(user_phone, params) {
-    const { tipo, monto, descripcion, categoria, fecha } = params;
+    const {
+        tipo, monto, descripcion, categoria, fecha,
+        es_compartido, quien_pago, split_custom_user, split_custom_partner
+    } = params;
 
     // Convertir tipo a formato de BD
     const type = tipo === 'gasto' ? 'expense' : 'income';
@@ -338,7 +375,114 @@ async function handleRegistrarTransaccion(user_phone, params) {
         transactionDate = getTodayMexico();
     }
 
-    // Crear transacción
+    // ============ GASTO COMPARTIDO ============
+    if (es_compartido === true) {
+        console.log(`💑 Detectado gasto compartido: ${user_phone} | Pagó: ${quien_pago || 'yo'}`);
+
+        // Verificar que el usuario tenga pareja registrada
+        const relationship = await getRelationship(user_phone);
+
+        if (!relationship) {
+            // Fallback: Crear gasto INDIVIDUAL y sugerir registrar pareja
+            console.log(`⚠️ Usuario sin pareja detectado, creando gasto individual con sugerencia`);
+
+            const transaction = await createTransaction({
+                user_phone,
+                category_id: category.id,
+                type,
+                amount: monto,
+                description: descripcion,
+                transaction_date: transactionDate
+            });
+
+            saveLastTransaction(user_phone, transaction);
+
+            // Agregar metadata de sugerencia para que generateNaturalResponse lo use
+            return {
+                ...transaction,
+                category_name: category.name,
+                category_icon: category.icon,
+                is_shared: false,
+                suggest_partner: true  // Flag para incluir sugerencia
+            };
+        }
+
+        if (relationship.status !== 'active') {
+            throw new Error('Tu pareja aún no ha aceptado la solicitud de relación. Los gastos compartidos solo funcionan cuando ambos han aceptado.');
+        }
+
+        // Obtener información de división (custom o default)
+        const splitInfo = await getSplitInfo(
+            user_phone,
+            split_custom_user,
+            split_custom_partner
+        );
+
+        // Determinar quién pagó
+        let payer_phone;
+        if (quien_pago === 'pareja') {
+            payer_phone = splitInfo.partner_phone;
+        } else {
+            // Default: 'yo' o null
+            payer_phone = user_phone;
+        }
+
+        console.log(`💰 División: ${splitInfo.user_split}% / ${splitInfo.partner_split}% | Pagador: ${payer_phone}`);
+
+        // Crear gasto compartido (esto crea 2 transacciones)
+        const sharedTransaction = await createSharedTransaction({
+            payer_phone,
+            partner_phone: splitInfo.partner_phone,
+            total_amount: monto,
+            category_id: category.id,
+            type,
+            description: descripcion,
+            split_user1: splitInfo.user_split,
+            split_user2: splitInfo.partner_split,
+            transaction_date: transactionDate,
+            relationship_id: relationship.id
+        });
+
+        console.log(`✅ Gasto compartido creado: ID ${sharedTransaction.shared_transaction_id}`);
+
+        // Notificar a la pareja del nuevo gasto
+        await notifyPartnerOfSharedExpense(splitInfo.partner_phone, {
+            payer_phone,
+            total_amount: monto,
+            description: descripcion,
+            category_name: category.name,
+            category_icon: category.icon,
+            partner_percentage: splitInfo.partner_split,
+            partner_amount: sharedTransaction.partner_amount,
+            payer_percentage: splitInfo.user_split,
+            payer_amount: sharedTransaction.user_amount
+        });
+
+        console.log(`📨 Notificación de gasto compartido enviada a ${splitInfo.partner_phone}`);
+
+        // Guardar referencia para posibles correcciones
+        saveLastTransaction(user_phone, {
+            id: sharedTransaction.user_transaction_id,
+            amount: sharedTransaction.user_amount,
+            type,
+            description: descripcion,
+            category_id: category.id,
+            is_shared: true,
+            shared_transaction_id: sharedTransaction.shared_transaction_id
+        });
+
+        return {
+            ...sharedTransaction,
+            category_name: category.name,
+            category_icon: category.icon,
+            is_shared: true
+        };
+    }
+
+    // ============ GASTO INDIVIDUAL ============
+    console.log(`👤 Gasto individual: ${user_phone}`);
+
+    // Crear transacción individual (comportamiento original)
     const transaction = await createTransaction({
         user_phone,
         category_id: category.id,
@@ -1529,6 +1673,366 @@ async function handleCorregirUltimaTransaccion(user_phone, params) {
         console.error('Error corrigiendo transacción:', error);
         return {
             response: `❌ Error al corregir la transacción: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja el registro de una pareja para gastos compartidos
+ */
+async function handleRegistrarPareja(user_phone, params) {
+    const { partner_phone, partner_name, split_user = 50, split_partner = 50 } = params;
+
+    try {
+        // Validar formato de teléfono
+        if (!partner_phone || partner_phone.length !== 10) {
+            return {
+                response: '❌ El teléfono de tu pareja debe tener 10 dígitos. Ejemplo: 5512345678'
+            };
+        }
+
+        // Validar que no sea el mismo usuario
+        if (partner_phone === user_phone) {
+            return {
+                response: '❌ No puedes crear una relación contigo mismo 😅'
+            };
+        }
+
+        // Validar división
+        if (split_user + split_partner !== 100) {
+            return {
+                response: `❌ La división debe sumar 100%. Especificaste ${split_user}/${split_partner} que suma ${split_user + split_partner}%.`
+            };
+        }
+
+        // Verificar si ya tiene una relación
+        const existingRelationship = await getRelationship(user_phone);
+        if (existingRelationship && existingRelationship.status === 'active') {
+            return {
+                response: `Ya tienes una relación activa para gastos compartidos. Si quieres cambiar la división, puedes decir: "cambia la división a ${split_user}/${split_partner}"`
+            };
+        }
+
+        // Crear relación
+        const relationship = await createRelationship({
+            user_phone_1: user_phone,
+            user_phone_2: partner_phone,
+            default_split_user1: split_user,
+            default_split_user2: split_partner
+        });
+
+        // Enviar notificación a la pareja
+        await notifyRelationshipRequest(user_phone, partner_phone, {
+            split_user1: split_user,
+            split_user2: split_partner
+        });
+
+        console.log(`📨 Notificación enviada a ${partner_phone}`);
+
+        const partnerNameText = partner_name ? `(${partner_name})` : '';
+
+        return {
+            relationship,
+            response: `✅ ¡Listo! Solicitud enviada a ${partner_phone} ${partnerNameText}
+
+División propuesta: ${split_user}% tú, ${split_partner}% tu pareja
+
+Cuando acepte la solicitud, podrán empezar a registrar gastos compartidos.
+
+Para registrar un gasto compartido, di algo como:
+• "Gasté 200 en comida, pagué yo"
+• "Gasté 300 en restaurante, pagué yo 50/50"`
+        };
+
+    } catch (error) {
+        console.error('Error registrando pareja:', error);
+        return {
+            response: `❌ Error al registrar pareja: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la consulta de balance con la pareja
+ */
+async function handleConsultarBalance(user_phone, params) {
+    const { periodo = 'mes_actual' } = params;
+
+    try {
+        // Verificar que tenga pareja
+        const relationship = await getRelationship(user_phone);
+
+        if (!relationship) {
+            return {
+                response: `No tienes una pareja registrada para gastos compartidos.
+
+Para registrar una pareja, di algo como:
+"Registra a mi pareja con teléfono 5512345678, dividir 65/35"`
+            };
+        }
+
+        // Determinar número de pareja
+        const partnerPhone = relationship.user_phone_1 === user_phone
+            ? relationship.user_phone_2
+            : relationship.user_phone_1;
+
+        // Calcular balance
+        const balance = await calculateBalance(user_phone, partnerPhone, periodo);
+
+        // Determinar texto del periodo
+        const periodoTexto = periodo === 'mes_actual' ? 'este mes' :
+                           periodo === 'mes_pasado' ? 'el mes pasado' :
+                           'en total';
+
+        // Generar respuesta formateada
+        let response = `⚖️ Balance de gastos compartidos ${periodoTexto}:\n\n`;
+        response += `💰 TOTAL COMPARTIDO: $${balance.total_shared_expenses}\n`;
+        response += `📊 ${balance.expense_count} gasto${balance.expense_count > 1 ? 's' : ''} compartido${balance.expense_count > 1 ? 's' : ''}\n\n`;
+
+        response += `TÚ:\n`;
+        response += `• Pagaste: $${balance.user.paid_total} (${balance.user.paid_count} gasto${balance.user.paid_count > 1 ? 's' : ''})\n`;
+        response += `• Tu parte: $${balance.user.owes_total}\n\n`;
+
+        response += `TU PAREJA:\n`;
+        response += `• Pagó: $${balance.partner.paid_total} (${balance.partner.paid_count} gasto${balance.partner.paid_count > 1 ? 's' : ''})\n`;
+        response += `• Su parte: $${balance.partner.owes_total}\n\n`;
+
+        response += `⚖️ BALANCE:\n`;
+        if (balance.who_owes_whom === 'partner_owes_user') {
+            response += `→ Tu pareja te debe: $${balance.amount_owed} 💵`;
+        } else if (balance.who_owes_whom === 'user_owes_partner') {
+            response += `→ Tú le debes a tu pareja: $${balance.amount_owed} 💳`;
+        } else {
+            response += `→ Están a mano! 🤝`;
+        }
+
+        return {
+            balance,
+            response
+        };
+
+    } catch (error) {
+        console.error('Error consultando balance:', error);
+        return {
+            response: `❌ Error al consultar balance: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja el listado de gastos compartidos
+ */
+async function handleListarGastosCompartidos(user_phone, params) {
+    const { periodo = 'mes_actual', categoria } = params;
+
+    try {
+        // Verificar que tenga pareja
+        const relationship = await getRelationship(user_phone);
+
+        if (!relationship) {
+            return {
+                response: 'No tienes una pareja registrada para gastos compartidos.'
+            };
+        }
+
+        // Obtener gastos compartidos
+        let expenses = await getSharedTransactions(user_phone, periodo);
+
+        // Filtrar por categoría si se especifica
+        if (categoria) {
+            expenses = expenses.filter(e => e.category_name === categoria);
+        }
+
+        if (expenses.length === 0) {
+            const periodoTexto = periodo === 'mes_actual' ? 'este mes' :
+                               periodo === 'mes_pasado' ? 'el mes pasado' : '';
+            const categoriaTexto = categoria ? ` en ${categoria}` : '';
+
+            return {
+                expenses: [],
+                response: `No encontré gastos compartidos${categoriaTexto} ${periodoTexto}.`
+            };
+        }
+
+        // Generar lista formateada
+        const periodoTexto = periodo === 'mes_actual' ? 'este mes' :
+                           periodo === 'mes_pasado' ? 'el mes pasado' :
+                           'en total';
+
+        let response = `📋 Gastos compartidos ${periodoTexto}:\n\n`;
+
+        expenses.forEach((expense, index) => {
+            const paidByUser = expense.payer_phone === user_phone;
+            const paidByText = paidByUser ? '(tú pagaste)' : '(pagó tu pareja)';
+
+            response += `${index + 1}. $${expense.total_amount} - ${expense.description || expense.category_name} ${paidByText}\n`;
+            response += `   Tu parte: $${expense.user_amount} (${expense.user_percentage}%)\n\n`;
+        });
+
+        response += `Total: ${expenses.length} gasto${expenses.length > 1 ? 's' : ''} compartido${expenses.length > 1 ? 's' : ''}`;
+
+        return {
+            expenses,
+            response
+        };
+
+    } catch (error) {
+        console.error('Error listando gastos compartidos:', error);
+        return {
+            response: `❌ Error al listar gastos compartidos: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la actualización de la división por defecto
+ */
+async function handleActualizarDivisionDefault(user_phone, params) {
+    const { split_user, split_partner } = params;
+
+    try {
+        // Validar división
+        if (split_user + split_partner !== 100) {
+            return {
+                response: `❌ La división debe sumar 100%. Especificaste ${split_user}/${split_partner} que suma ${split_user + split_partner}%.`
+            };
+        }
+
+        // Verificar que tenga pareja
+        const relationship = await getRelationship(user_phone);
+
+        if (!relationship) {
+            return {
+                response: 'No tienes una pareja registrada para gastos compartidos. Primero registra una pareja.'
+            };
+        }
+
+        // Actualizar división
+        const updated = await updateDefaultSplitByPhone(user_phone, split_user, split_partner);
+
+        // Obtener teléfono de la pareja
+        const partner_phone = relationship.user_phone_1 === user_phone
+            ? relationship.user_phone_2
+            : relationship.user_phone_1;
+
+        // Notificar a la pareja del cambio
+        await notifyDivisionUpdated(partner_phone, user_phone, split_user, split_partner);
+
+        console.log(`📨 Notificación de división actualizada enviada a ${partner_phone}`);
+
+        return {
+            updated,
+            response: `✅ División actualizada a ${split_user}/${split_partner}
+
+A partir de ahora, los gastos compartidos se dividirán:
+• Tú: ${split_user}%
+• Tu pareja: ${split_partner}%
+
+Si quieres usar una división diferente para un gasto específico, solo menciona el porcentaje:
+"Gasté 200 en comida, pagué yo 50/50"`
+        };
+
+    } catch (error) {
+        console.error('Error actualizando división:', error);
+        return {
+            response: `❌ Error al actualizar división: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja aceptación de solicitud de pareja
+ */
+async function handleAceptarSolicitudPareja(user_phone, params) {
+    try {
+        console.log(`✅ Aceptando solicitud de pareja: ${user_phone}`);
+
+        // Buscar solicitud pendiente
+        const pendingRequests = await getPendingRequests(user_phone);
+
+        if (!pendingRequests || pendingRequests.length === 0) {
+            return {
+                response: `No tienes solicitudes pendientes de pareja.
+
+Si alguien quiere compartir gastos contigo, recibirás una notificación aquí.`
+            };
+        }
+
+        // Tomar la solicitud más reciente
+        const request = pendingRequests[0];
+        const requester_phone = request.user_phone_1 === user_phone ? request.user_phone_2 : request.user_phone_1;
+
+        // Aceptar la relación
+        const accepted = await acceptRelationshipByPhone(user_phone, requester_phone);
+
+        console.log(`🎉 Solicitud aceptada: ${user_phone} <-> ${requester_phone}`);
+
+        // Notificar al solicitante
+        await notifyRelationshipAccepted(requester_phone, user_phone);
+
+        return {
+            accepted,
+            response: `🎉 ¡Perfecto! Ahora compartes gastos con ${requester_phone}
+
+📊 División configurada:
+• Tú: ${accepted.user_phone_1 === user_phone ? accepted.default_split_user1 : accepted.default_split_user2}%
+• ${requester_phone}: ${accepted.user_phone_1 === user_phone ? accepted.default_split_user2 : accepted.default_split_user1}%
+
+💡 Ahora cuando registres gastos puedes decir:
+• "Gasté 200 en comida, pagué yo"
+• "Mi pareja pagó 150 en uber"
+• "Gasté 300 en super, pagué yo 60/40" (división custom)
+
+Para ver el balance di: "¿Cómo va el balance?"`
+        };
+
+    } catch (error) {
+        console.error('Error aceptando solicitud:', error);
+        return {
+            response: `❌ Error al aceptar solicitud: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja rechazo de solicitud de pareja
+ */
+async function handleRechazarSolicitudPareja(user_phone, params) {
+    try {
+        console.log(`❌ Rechazando solicitud de pareja: ${user_phone}`);
+
+        // Buscar solicitud pendiente
+        const pendingRequests = await getPendingRequests(user_phone);
+
+        if (!pendingRequests || pendingRequests.length === 0) {
+            return {
+                response: `No tienes solicitudes pendientes de pareja.`
+            };
+        }
+
+        // Tomar la solicitud más reciente
+        const request = pendingRequests[0];
+        const requester_phone = request.user_phone_1 === user_phone ? request.user_phone_2 : request.user_phone_1;
+
+        // Rechazar la relación
+        const rejected = await rejectRelationshipByPhone(user_phone, requester_phone);
+
+        console.log(`🚫 Solicitud rechazada: ${user_phone} rechazó a ${requester_phone}`);
+
+        // Notificar al solicitante
+        await notifyRelationshipRejected(requester_phone, user_phone);
+
+        return {
+            rejected,
+            response: `✅ Solicitud rechazada
+
+No compartirás gastos con ${requester_phone}. Puedes seguir usando BUBU normalmente para tus gastos personales.`
+        };
+
+    } catch (error) {
+        console.error('Error rechazando solicitud:', error);
+        return {
+            response: `❌ Error al rechazar solicitud: ${error.message}`
         };
     }
 }
