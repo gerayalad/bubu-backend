@@ -669,6 +669,16 @@ IMPORTANTE: Solo usa confirmar_receipt, corregir_receipt o proporcionar_monto cu
 Sé inteligente al categorizar. Si el usuario dice "tacos", "pizza", "restaurante" → categoría Comida.
 Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
 
+        // 🔍 DEBUG: Log de funciones disponibles y mensaje del usuario
+        console.log('🔍 [OPENAI DEBUG] ===== INICIO =====');
+        console.log('📝 Mensaje del usuario:', mensaje);
+        console.log('🎯 Funciones disponibles:', functions.map(f => f.name).join(', '));
+        const hasRegistrarPareja = functions.find(f => f.name === 'registrar_pareja');
+        console.log('💑 ¿Tiene registrar_pareja?', hasRegistrarPareja ? '✅ SÍ' : '❌ NO');
+        if (hasRegistrarPareja) {
+            console.log('📋 Descripción de registrar_pareja:', hasRegistrarPareja.description);
+        }
+
         const response = await openai.chat.completions.create({
             model: 'gpt-4o-mini',
             messages: [
@@ -687,6 +697,10 @@ Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
             const functionName = message.function_call.name;
             const args = JSON.parse(message.function_call.arguments);
 
+            console.log('✅ [OPENAI DEBUG] OpenAI llamó función:', functionName);
+            console.log('📦 [OPENAI DEBUG] Argumentos:', JSON.stringify(args, null, 2));
+            console.log('🔍 [OPENAI DEBUG] ===== FIN =====');
+
             return {
                 action: functionName,
                 parameters: args,
@@ -696,6 +710,10 @@ Si dice "uber", "gasolina", "taxi" → categoría Transporte.`;
         }
 
         // Si no llamó a ninguna función, es conversación general
+        console.log('⚠️ [OPENAI DEBUG] OpenAI NO llamó ninguna función');
+        console.log('💬 [OPENAI DEBUG] Respuesta texto:', message.content);
+        console.log('🔍 [OPENAI DEBUG] ===== FIN =====');
+
         return {
             action: 'conversacion_general',
             parameters: { tipo_mensaje: 'otro' },
