@@ -1690,17 +1690,21 @@ async function handleRegistrarPareja(user_phone, params) {
     });
 
     try {
-        // Normalizar número de teléfono (remover código de país +52 si existe)
+        // Normalizar número de teléfono (remover código de país +52 1 si existe)
         if (partner_phone) {
             // Remover espacios, guiones y signos +
             partner_phone = partner_phone.replace(/[\s\-+]/g, '');
 
-            // Si empieza con 52 y tiene más de 10 dígitos, remover el código de país
-            if (partner_phone.startsWith('52') && partner_phone.length > 10) {
-                partner_phone = partner_phone.substring(2);
+            // México: +52 1 XXXXXXXXXX (código país + 1 celular + 10 dígitos)
+            if (partner_phone.startsWith('521') && partner_phone.length > 10) {
+                partner_phone = partner_phone.substring(3); // Remover "521"
+            }
+            // O solo código país: +52 XXXXXXXXXX
+            else if (partner_phone.startsWith('52') && partner_phone.length > 10) {
+                partner_phone = partner_phone.substring(2); // Remover "52"
             }
 
-            console.log('📞 Teléfono normalizado:', partner_phone);
+            console.log('📞 Teléfono normalizado:', partner_phone, `(original tenía ${params.partner_phone.length} caracteres)`);
         }
 
         // Validar formato de teléfono (debe ser exactamente 10 dígitos)
