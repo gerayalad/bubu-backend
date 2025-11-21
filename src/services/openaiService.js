@@ -18,7 +18,7 @@ async function getOpenAIFunctions() {
     return [
         {
             name: 'registrar_transaccion',
-            description: 'Registra un gasto o ingreso del usuario DIRECTAMENTE (sin confirmación). Usa esta función cuando el usuario mencione que gastó dinero, pagó algo, recibió dinero, le pagaron, etc. IMPORTANTE: Usa confirmar_transaccion para webchat con confirmación.',
+            description: 'Registra un gasto o ingreso del usuario DIRECTAMENTE (sin confirmación). Usa esta función cuando el usuario mencione que gastó dinero, pagó algo, recibió dinero, le pagaron, etc. IMPORTANTE: Usa confirmar_transaccion para webchat con confirmación. GASTOS COMPARTIDOS: Detecta si dice "pagué yo", "pagó mi pareja", "pago yo", "paga mi pareja", "50/50", "partes iguales", "mitad", "40/60", etc.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -43,6 +43,23 @@ async function getOpenAIFunctions() {
                     fecha: {
                         type: 'string',
                         description: 'Fecha de la transacción en formato YYYY-MM-DD. Si el usuario dice "ayer", "hoy", "antier", etc., calcula la fecha correcta. Si no se especifica, usa la fecha actual.'
+                    },
+                    es_compartido: {
+                        type: 'boolean',
+                        description: 'true si menciona "pagué yo", "pagó mi pareja", "pago yo", "pago mi pareja", o especifica división (50/50, etc.). false si dice "solo yo" o no menciona nada de compartir'
+                    },
+                    quien_pago: {
+                        type: 'string',
+                        enum: ['yo', 'pareja', null],
+                        description: 'Quién pagó el gasto. "yo" si dice "pagué yo" o "pago yo". "pareja" si dice "pagó mi pareja" o "paga mi pareja". null si no es compartido o no se especifica'
+                    },
+                    split_custom_user: {
+                        type: 'number',
+                        description: 'Porcentaje custom del usuario si especifica división. Ejemplos: "50/50" → 50, "40/60" → 40, "mitad" → 50, "partes iguales" → 50, "70/30" → 70. null si usa división default'
+                    },
+                    split_custom_partner: {
+                        type: 'number',
+                        description: 'Porcentaje custom de la pareja. Ejemplos: "50/50" → 50, "40/60" → 60, "mitad" → 50, "partes iguales" → 50, "70/30" → 30. null si usa división default. Debe sumar 100 con split_custom_user'
                     }
                 },
                 required: ['tipo', 'monto', 'descripcion', 'categoria']
@@ -376,6 +393,101 @@ async function getOpenAIFunctions() {
             }
         },
         {
+            name: 'registrar_pareja',
+            description: 'Registra una relación con otra persona para compartir gastos. Detecta frases como: "registra a mi pareja con teléfono X", "quiero compartir gastos con X", "dividir gastos 65/35 con X", "mi roommate es X".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    partner_phone: {
+                        type: 'string',
+                        description: 'Teléfono de 10 dígitos de la persona con quien compartir gastos (sin espacios ni guiones)'
+                    },
+                    partner_name: {
+                        type: 'string',
+                        description: 'Nombre opcional de la pareja/persona (si lo menciona)'
+                    },
+                    split_user: {
+                        type: 'number',
+                        description: 'Porcentaje del usuario actual (ej: 65 para 65%). Si no especifica, usa 50'
+                    },
+                    split_partner: {
+                        type: 'number',
+                        description: 'Porcentaje de la pareja (ej: 35 para 35%). Si no especifica, usa 50. Debe sumar 100 con split_user'
+                    }
+                },
+                required: ['partner_phone']
+            }
+        },
+        {
+            name: 'consultar_balance',
+            description: 'Consulta el balance de gastos compartidos con la pareja. Detecta: "quién debe a quién", "balance con mi pareja", "cómo vamos con los gastos compartidos", "cuánto me debe mi pareja", "cuánto le debo".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    periodo: {
+                        type: 'string',
+                        enum: ['mes_actual', 'mes_pasado', 'todos'],
+                        description: 'Periodo a consultar. Default: mes_actual'
+                    }
+                }
+            }
+        },
+        {
+            name: 'listar_gastos_compartidos',
+            description: 'Lista los gastos compartidos con la pareja. Detecta: "muestra gastos compartidos", "qué hemos gastado juntos", "gastos con mi pareja", "lista de gastos compartidos".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    periodo: {
+                        type: 'string',
+                        enum: ['mes_actual', 'mes_pasado', 'todos'],
+                        description: 'Periodo de consulta'
+                    },
+                    categoria: {
+                        type: 'string',
+                        description: 'Filtrar por categoría específica',
+                        enum: [...categories.map(c => c.name), null]
+                    }
+                }
+            }
+        },
+        {
+            name: 'actualizar_division_default',
+            description: 'Actualiza la división por defecto de gastos compartidos. Detecta: "cambia la división a 70/30", "ahora dividir 60/40", "modificar split a partes iguales", "cambiar porcentaje a 65/35".',
+            parameters: {
+                type: 'object',
+                properties: {
+                    split_user: {
+                        type: 'number',
+                        description: 'Nuevo porcentaje del usuario (ej: 70 para 70%)'
+                    },
+                    split_partner: {
+                        type: 'number',
+                        description: 'Nuevo porcentaje de la pareja (ej: 30 para 30%). Debe sumar 100 con split_user'
+                    }
+                },
+                required: ['split_user', 'split_partner']
+            }
+        },
+        {
+            name: 'aceptar_solicitud_pareja',
+            description: 'Usuario ACEPTA una solicitud de compartir gastos con otra persona. Detecta: "acepto", "sí acepto", "acepto la solicitud", "ok acepto", "sí quiero", "aceptar".',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: []
+            }
+        },
+        {
+            name: 'rechazar_solicitud_pareja',
+            description: 'Usuario RECHAZA una solicitud de compartir gastos. Detecta: "rechazar", "no acepto", "rechazar solicitud", "no quiero", "no gracias", "cancelar solicitud".',
+            parameters: {
+                type: 'object',
+                properties: {},
+                required: []
+            }
+        },
+        {
             name: 'conversacion_general',
             description: 'Para saludos, agradecimientos, despedidas o conversación casual que no requiere acción específica',
             parameters: {
@@ -610,8 +722,39 @@ export async function generateNaturalResponse(data) {
 
         switch (action) {
             case 'registrar_transaccion':
-                prompt = `El usuario registró una transacción: ${JSON.stringify(result)}.
+                // Detectar si es gasto compartido
+                if (result.is_shared) {
+                    // Gasto compartido
+                    const whoPaid = result.payer_phone === data.userPhone ? 'tú' : 'tu pareja';
+                    prompt = `El usuario registró un GASTO COMPARTIDO:
+- Total: $${result.total_amount}
+- Pagó: ${whoPaid}
+- División: Usuario ${result.user_percentage}% ($${result.user_amount}) / Pareja ${result.partner_percentage}% ($${result.partner_amount})
+- Categoría: ${result.category_name}
+- Descripción: ${result.description}
+
+Genera una confirmación breve y clara (2-3 líneas) que:
+1. Confirme que se registró el gasto compartido
+2. Mencione el total y quién pagó
+3. Muestre la división (porcentajes y montos de cada uno)
+
+Ejemplo: "✅ Registré el gasto compartido de $${result.total_amount} en ${result.category_name}. ${whoPaid === 'tú' ? 'Tú pagaste' : 'Tu pareja pagó'} todo, pero se divide: tú ${result.user_percentage}% ($${result.user_amount}) y tu pareja ${result.partner_percentage}% ($${result.partner_amount})."`;
+                } else {
+                    // Gasto individual
+                    let basePrompt = `El usuario registró una transacción: ${JSON.stringify(result)}.
 Genera una confirmación breve y amigable (1-2 líneas) confirmando que se registró el ${result.type === 'expense' ? 'gasto' : 'ingreso'} de $${result.amount} en ${result.category_name}.`;
+
+                    // Si sugirió compartir pero no tiene pareja, agregar sugerencia
+                    if (result.suggest_partner) {
+                        basePrompt += `
+
+IMPORTANTE: El usuario dijo "pagué yo" pero NO tiene pareja registrada, así que se creó como gasto individual.
+Agrega al final (en una línea separada con emoji 💡) una sugerencia amigable y breve:
+"💡 Si quieres compartir gastos con alguien, puedes registrar una pareja diciendo: 'Registra a mi pareja con el número [teléfono]'"`;
+                    }
+
+                    prompt = basePrompt;
+                }
                 break;
 
             case 'consultar_estado':
