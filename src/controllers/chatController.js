@@ -1683,6 +1683,12 @@ async function handleCorregirUltimaTransaccion(user_phone, params) {
 async function handleRegistrarPareja(user_phone, params) {
     const { partner_phone, partner_name, split_user = 50, split_partner = 50 } = params;
 
+    console.log('🎯 [DEPLOY VERIFICATION] handleRegistrarPareja called - NEW CODE IS RUNNING ✅', {
+        user_phone,
+        partner_phone,
+        timestamp: new Date().toISOString()
+    });
+
     try {
         // Validar formato de teléfono
         if (!partner_phone || partner_phone.length !== 10) {
