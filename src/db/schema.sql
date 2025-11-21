@@ -1,5 +1,5 @@
 -- ============================================
--- BUBU - Sistema de Finanzas Personales
+-- BUBU - Sistema de Rastreo de Gastos
 -- Schema de Base de Datos PostgreSQL
 -- ============================================
 
@@ -18,11 +18,11 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
 
 -- Tabla de categorías
--- Catálogo de categorías de ingresos/gastos
+-- Catálogo de categorías de gastos
 CREATE TABLE IF NOT EXISTS categories (
     id SERIAL PRIMARY KEY,
     name VARCHAR(50) UNIQUE NOT NULL,
-    type VARCHAR(10) NOT NULL CHECK(type IN ('income', 'expense')),
+    type VARCHAR(10) NOT NULL CHECK(type = 'expense'),
     color VARCHAR(7) DEFAULT '#6B7280',
     icon VARCHAR(50),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -32,12 +32,12 @@ CREATE TABLE IF NOT EXISTS categories (
 CREATE INDEX IF NOT EXISTS idx_categories_type ON categories(type);
 
 -- Tabla de transacciones
--- Movimientos individuales (ingresos o gastos)
+-- Movimientos de gastos
 CREATE TABLE IF NOT EXISTS transactions (
     id SERIAL PRIMARY KEY,
     user_phone VARCHAR(10) NOT NULL,
     category_id INTEGER NOT NULL,
-    type VARCHAR(10) NOT NULL CHECK(type IN ('income', 'expense')),
+    type VARCHAR(10) NOT NULL CHECK(type = 'expense'),
     amount DECIMAL(10,2) NOT NULL,
     description TEXT,
     transaction_date DATE NOT NULL,
@@ -90,7 +90,7 @@ CREATE INDEX IF NOT EXISTS idx_receipt_status ON receipt_images(status);
 -- Datos iniciales: Categorías predefinidas
 -- ============================================
 
--- Categorías de Gastos
+-- Categorías de Gastos (predefinidas)
 INSERT INTO categories (name, type, color, icon) VALUES
     ('Comida', 'expense', '#EF4444', '🍔'),
     ('Transporte', 'expense', '#F59E0B', '🚗'),
@@ -101,12 +101,4 @@ INSERT INTO categories (name, type, color, icon) VALUES
     ('Ropa', 'expense', '#EC4899', '👕'),
     ('Hogar', 'expense', '#6366F1', '🏠'),
     ('Otros Gastos', 'expense', '#6B7280', '📦')
-ON CONFLICT (name) DO NOTHING;
-
--- Categorías de Ingresos
-INSERT INTO categories (name, type, color, icon) VALUES
-    ('Nómina', 'income', '#22C55E', '💰'),
-    ('Ventas', 'income', '#14B8A6', '🤝'),
-    ('Inversiones', 'income', '#F59E0B', '📈'),
-    ('Otros Ingresos', 'income', '#6B7280', '💵')
 ON CONFLICT (name) DO NOTHING;
