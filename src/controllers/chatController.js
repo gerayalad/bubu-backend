@@ -446,6 +446,11 @@ async function handleRegistrarTransaccion(user_phone, params) {
 
         console.log(`✅ Gasto compartido creado: ID ${sharedTransaction.shared_transaction_id}`);
 
+        // Determinar quién es el usuario actual y quién es el partner
+        const isUser1 = sharedTransaction.user1.phone === user_phone;
+        const userData = isUser1 ? sharedTransaction.user1 : sharedTransaction.user2;
+        const partnerData = isUser1 ? sharedTransaction.user2 : sharedTransaction.user1;
+
         // Notificar a la pareja del nuevo gasto
         await notifyPartnerOfSharedExpense(splitInfo.partner_phone, {
             payer_phone,
@@ -453,18 +458,18 @@ async function handleRegistrarTransaccion(user_phone, params) {
             description: descripcion,
             category_name: category.name,
             category_icon: category.icon,
-            partner_percentage: splitInfo.partner_split,
-            partner_amount: sharedTransaction.partner_amount,
-            payer_percentage: splitInfo.user_split,
-            payer_amount: sharedTransaction.user_amount
+            partner_percentage: partnerData.percentage,
+            partner_amount: partnerData.amount,
+            payer_percentage: userData.percentage,
+            payer_amount: userData.amount
         });
 
         console.log(`📨 Notificación de gasto compartido enviada a ${splitInfo.partner_phone}`);
 
         // Guardar referencia para posibles correcciones
         saveLastTransaction(user_phone, {
-            id: sharedTransaction.user_transaction_id,
-            amount: sharedTransaction.user_amount,
+            id: userData.transaction_id,
+            amount: userData.amount,
             type,
             description: descripcion,
             category_id: category.id,
@@ -476,7 +481,12 @@ async function handleRegistrarTransaccion(user_phone, params) {
             ...sharedTransaction,
             category_name: category.name,
             category_icon: category.icon,
-            is_shared: true
+            is_shared: true,
+            // Mapear para generateNaturalResponse
+            user_percentage: userData.percentage,
+            partner_percentage: partnerData.percentage,
+            user_amount: userData.amount,
+            partner_amount: partnerData.amount
         };
     }
 
