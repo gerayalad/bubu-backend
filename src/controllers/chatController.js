@@ -1681,7 +1681,7 @@ async function handleCorregirUltimaTransaccion(user_phone, params) {
  * Maneja el registro de una pareja para gastos compartidos
  */
 async function handleRegistrarPareja(user_phone, params) {
-    const { partner_phone, partner_name, split_user = 50, split_partner = 50 } = params;
+    let { partner_phone, partner_name, split_user = 50, split_partner = 50 } = params;
 
     console.log('🎯 [DEPLOY VERIFICATION] handleRegistrarPareja called - NEW CODE IS RUNNING ✅', {
         user_phone,
@@ -1690,10 +1690,23 @@ async function handleRegistrarPareja(user_phone, params) {
     });
 
     try {
-        // Validar formato de teléfono
-        if (!partner_phone || partner_phone.length !== 10) {
+        // Normalizar número de teléfono (remover código de país +52 si existe)
+        if (partner_phone) {
+            // Remover espacios, guiones y signos +
+            partner_phone = partner_phone.replace(/[\s\-+]/g, '');
+
+            // Si empieza con 52 y tiene más de 10 dígitos, remover el código de país
+            if (partner_phone.startsWith('52') && partner_phone.length > 10) {
+                partner_phone = partner_phone.substring(2);
+            }
+
+            console.log('📞 Teléfono normalizado:', partner_phone);
+        }
+
+        // Validar formato de teléfono (debe ser exactamente 10 dígitos)
+        if (!partner_phone || partner_phone.length !== 10 || !/^\d{10}$/.test(partner_phone)) {
             return {
-                response: '❌ El teléfono de tu pareja debe tener 10 dígitos. Ejemplo: 5512345678'
+                response: '❌ El teléfono de tu pareja debe tener 10 dígitos. Ejemplo: 5512345678 o +525512345678'
             };
         }
 
