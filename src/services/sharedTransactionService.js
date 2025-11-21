@@ -42,8 +42,10 @@ export async function createSharedTransaction(data) {
         throw new Error('Faltan datos obligatorios: payer_phone, partner_phone, total_amount, category_id');
     }
 
-    if (split_user1 + split_user2 !== 100) {
-        throw new Error('La división debe sumar 100%');
+    // Validar que la suma sea 100% (con tolerancia de 0.01 para errores de punto flotante)
+    const sumaSplit = Math.round((split_user1 + split_user2) * 100) / 100;
+    if (Math.abs(sumaSplit - 100) > 0.01) {
+        throw new Error(`La división debe sumar 100% (actual: ${sumaSplit}%)`);
     }
 
     if (total_amount <= 0) {
