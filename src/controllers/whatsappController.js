@@ -35,7 +35,8 @@ import {
     handleListarGastosCompartidos,
     handleActualizarDivisionDefault,
     handleAceptarSolicitudPareja,
-    handleRechazarSolicitudPareja
+    handleRechazarSolicitudPareja,
+    handleRegistrarTransaccion as handleRegistrarTransaccionFromChat
 } from './chatController.js';
 
 /**
@@ -248,7 +249,8 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'registrar_transaccion':
-                result = await handleRegistrarTransaccion(normalizedPhone, intent.parameters);
+                // Usar handler de chatController que tiene lógica de gastos compartidos
+                result = await handleRegistrarTransaccionFromChat(normalizedPhone, intent.parameters);
                 // Guardar como última transacción para poder corregirla
                 saveLastTransaction(normalizedPhone, result);
                 response = await generateNaturalResponse({
@@ -504,34 +506,9 @@ async function handleCorregirUltimaTransaccion(normalizedPhone, params) {
     };
 }
 
-async function handleRegistrarTransaccion(user_phone, params) {
-    const { tipo, monto, descripcion, categoria, fecha } = params;
-    const type = tipo === 'gasto' ? 'expense' : 'income';
-
-    let category = await getCategoryByName(categoria);
-    if (!category) {
-        category = await suggestCategory(descripcion, type);
-    }
-    if (!category) {
-        throw new Error(`No encontré la categoría "${categoria}"`);
-    }
-
-    let transactionDate = fecha;
-    if (!transactionDate) {
-        transactionDate = getTodayMexico();
-    }
-
-    const transaction = await createTransaction({
-        user_phone,
-        category_id: category.id,
-        type,
-        amount: monto,
-        description: descripcion,
-        transaction_date: transactionDate
-    });
-
-    return transaction;
-}
+// ❌ REMOVIDO: handleRegistrarTransaccion duplicado
+// Ahora se usa handleRegistrarTransaccionFromChat importado de chatController.js
+// que tiene la lógica completa de gastos compartidos con el fix || quien_pago
 
 async function handleConsultarEstado(user_phone, params) {
     const { periodo, fecha_inicio, fecha_fin, filtro_categoria, filtro_tipo } = params;

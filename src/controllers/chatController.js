@@ -2068,7 +2068,8 @@ export {
     handleListarGastosCompartidos,
     handleActualizarDivisionDefault,
     handleAceptarSolicitudPareja,
-    handleRechazarSolicitudPareja
+    handleRechazarSolicitudPareja,
+    handleRegistrarTransaccion
 };
 
 export default {
