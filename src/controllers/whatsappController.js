@@ -9,7 +9,7 @@ import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
 import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
-import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction, savePendingAudio, getPendingAudio, clearPendingAudio } from '../services/contextService.js';
+import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction, savePendingAudio, getPendingAudio, clearPendingAudio, savePendingReceipt, getPendingReceipt, clearPendingReceipt } from '../services/contextService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
 import { transcribeAudio, isSupportedAudioFormat } from '../services/audioTranscriptionService.js';
 import {
@@ -1030,6 +1030,22 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
                 await sendWhatsAppMessage(user_phone, '❌ Operación cancelada.');
                 break;
 
+            case 'receipt':
+                // Manejar respuestas de confirmación de receipt (foto de ticket)
+                console.log(`📸 Procesando respuesta de receipt: ${replyId}`);
+
+                if (replyId === 'receipt_individual') {
+                    await processReceiptAsIndividual(normalizedPhone, user_phone);
+                } else if (replyId === 'receipt_shared_yo') {
+                    await processReceiptAsShared(normalizedPhone, user_phone, 'yo');
+                } else if (replyId === 'receipt_shared_pareja') {
+                    await processReceiptAsShared(normalizedPhone, user_phone, 'pareja');
+                } else {
+                    console.log(`⚠️ Tipo de receipt no reconocido: ${replyId}`);
+                    await sendWhatsAppMessage(user_phone, 'No entendí esa opción. Por favor intenta de nuevo.');
+                }
+                break;
+
             default:
                 console.log(`⚠️ Acción no reconocida: ${action}`);
                 await sendWhatsAppMessage(user_phone, 'No entendí esa acción. ¿Puedes intentarlo de nuevo?');
@@ -1038,6 +1054,130 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
     } catch (error) {
         console.error('❌ Error procesando respuesta interactiva:', error);
         await sendWhatsAppMessage(user_phone, 'Lo siento, hubo un error procesando tu selección.');
+    }
+}
+
+/**
+ * Procesa un receipt (foto de ticket) como gasto INDIVIDUAL
+ */
+async function processReceiptAsIndividual(normalizedPhone, user_phone) {
+    try {
+        const pendingReceipt = getPendingReceipt(normalizedPhone);
+
+        if (!pendingReceipt) {
+            await sendWhatsAppMessage(user_phone, '⏰ La confirmación expiró (10 min). Por favor envía la foto de nuevo.');
+            return;
+        }
+
+        console.log(`👤 Procesando receipt como gasto individual: $${pendingReceipt.amount}`);
+
+        // Crear transacción individual
+        const transaction = await createTransaction({
+            user_phone: normalizedPhone,
+            category_id: pendingReceipt.category_id,
+            type: 'expense',
+            amount: pendingReceipt.amount,
+            description: pendingReceipt.description,
+            transaction_date: pendingReceipt.date
+        });
+
+        // Guardar registro de imagen
+        await saveReceiptImage({
+            user_phone: normalizedPhone,
+            whatsapp_media_id: pendingReceipt.media_id,
+            media_url: pendingReceipt.media_url,
+            ocr_result: pendingReceipt.ocr_result,
+            transaction_id: transaction.id,
+            status: 'processed'
+        });
+
+        // Limpiar pending receipt
+        clearPendingReceipt(normalizedPhone);
+
+        // Confirmar al usuario
+        const response = `✅ ¡Listo! Registré un gasto individual de $${transaction.amount} en ${pendingReceipt.category} 📸`;
+
+        await sendWhatsAppMessage(user_phone, response);
+
+        // Guardar en chat history
+        await saveChatMessage({
+            user_phone: normalizedPhone,
+            role: 'assistant',
+            message: response,
+            intent_json: null
+        });
+
+        console.log(`✅ Transacción individual creada desde receipt: ${transaction.id}`);
+
+    } catch (error) {
+        console.error('❌ Error procesando receipt como individual:', error);
+        await sendWhatsAppMessage(user_phone, 'Lo siento, hubo un error registrando el gasto. Por favor intenta de nuevo.');
+    }
+}
+
+/**
+ * Procesa un receipt (foto de ticket) como gasto COMPARTIDO
+ */
+async function processReceiptAsShared(normalizedPhone, user_phone, quien_pago) {
+    try {
+        const pendingReceipt = getPendingReceipt(normalizedPhone);
+
+        if (!pendingReceipt) {
+            await sendWhatsAppMessage(user_phone, '⏰ La confirmación expiró (10 min). Por favor envía la foto de nuevo.');
+            return;
+        }
+
+        console.log(`💑 Procesando receipt como gasto compartido: $${pendingReceipt.amount} | Pagó: ${quien_pago}`);
+
+        // Usar handleRegistrarTransaccionFromChat con parámetros de gasto compartido
+        const result = await handleRegistrarTransaccionFromChat(normalizedPhone, {
+            tipo: 'gasto',
+            monto: pendingReceipt.amount,
+            descripcion: pendingReceipt.description,
+            categoria: pendingReceipt.category,
+            fecha: pendingReceipt.date,
+            es_compartido: true,
+            quien_pago: quien_pago  // 'yo' o 'pareja'
+        });
+
+        // Guardar registro de imagen (asociar con la transacción del usuario actual)
+        const userData = result.user1.phone === normalizedPhone ? result.user1 : result.user2;
+
+        await saveReceiptImage({
+            user_phone: normalizedPhone,
+            whatsapp_media_id: pendingReceipt.media_id,
+            media_url: pendingReceipt.media_url,
+            ocr_result: pendingReceipt.ocr_result,
+            transaction_id: userData.transaction_id,
+            status: 'processed'
+        });
+
+        // Limpiar pending receipt
+        clearPendingReceipt(normalizedPhone);
+
+        // Generar respuesta natural
+        const response = await generateNaturalResponse({
+            action: 'registrar_transaccion',
+            result,
+            userMessage: `Gasté ${pendingReceipt.amount} en ${pendingReceipt.description}`,
+            userPhone: normalizedPhone
+        });
+
+        await sendWhatsAppMessage(user_phone, response);
+
+        // Guardar en chat history
+        await saveChatMessage({
+            user_phone: normalizedPhone,
+            role: 'assistant',
+            message: response,
+            intent_json: null
+        });
+
+        console.log(`✅ Gasto compartido creado desde receipt: shared_id ${result.shared_transaction_id}`);
+
+    } catch (error) {
+        console.error('❌ Error procesando receipt como compartido:', error);
+        await sendWhatsAppMessage(user_phone, 'Lo siento, hubo un error registrando el gasto compartido. Por favor intenta de nuevo.');
     }
 }
 
@@ -1143,7 +1283,7 @@ async function processImageMessage(user_phone, mediaId, messageId) {
             return;
         }
 
-        // Confianza alta: registrar automáticamente
+        // Confianza alta: verificar si tiene pareja para preguntar si es compartido
         console.log(`✅ Datos extraídos con confianza alta (${data.confidence}%)`);
 
         // Buscar categoría
@@ -1157,42 +1297,82 @@ async function processImageMessage(user_phone, mediaId, messageId) {
             return;
         }
 
-        // Crear transacción
-        const transaction = await createTransaction({
-            user_phone: normalizedPhone,
-            category_id: category.id,
-            type: 'expense',
-            amount: data.amount,
-            description: data.description || `Compra en ${data.merchant || 'comercio'}`,
-            transaction_date: data.date || getTodayMexico()
-        });
+        // Verificar si el usuario tiene pareja registrada
+        const relationship = await getRelationship(normalizedPhone);
+        const hasActivePartner = relationship && relationship.status === 'active';
 
-        // Guardar registro de imagen
-        await saveReceiptImage({
-            user_phone: normalizedPhone,
-            whatsapp_media_id: mediaId,
-            media_url: media.url,
-            ocr_result: data,
-            transaction_id: transaction.id,
-            status: 'processed'
-        });
+        if (hasActivePartner) {
+            // Usuario CON pareja: Guardar pending receipt y preguntar si es compartido
+            console.log(`💑 Usuario tiene pareja activa, mostrando opciones de gasto compartido`);
 
-        // Confirmar al usuario
-        const response = `✅ ¡Listo! Registré un gasto de $${data.amount} en ${data.category} 📸
+            const pendingReceiptData = {
+                amount: data.amount,
+                category: data.category,
+                category_id: category.id,
+                description: data.description || `Compra en ${data.merchant || 'comercio'}`,
+                merchant: data.merchant,
+                date: data.date || getTodayMexico(),
+                confidence: data.confidence,
+                media_id: mediaId,
+                media_url: media.url,
+                ocr_result: data
+            };
 
-"${data.description}"`;
+            savePendingReceipt(normalizedPhone, pendingReceiptData);
 
-        await sendWhatsAppMessage(user_phone, response);
+            // Enviar botones interactivos
+            await sendInteractiveButtons(
+                user_phone,
+                `📸 Vi un gasto de $${data.amount} en ${data.category}\n🏪 ${data.merchant || 'Comercio'}\n\n¿Es compartido?`,
+                [
+                    { id: 'receipt_individual', title: '👤 Solo yo' },
+                    { id: 'receipt_shared_yo', title: '💑 Pagué yo' },
+                    { id: 'receipt_shared_pareja', title: '💑 Pagó pareja' }
+                ]
+            );
 
-        // Guardar en chat history
-        await saveChatMessage({
-            user_phone: normalizedPhone,
-            role: 'assistant',
-            message: response,
-            intent_json: null
-        });
+            console.log(`📨 Botones de gasto compartido enviados`);
 
-        console.log(`✅ Transacción creada desde imagen: ${transaction.id}`);
+        } else {
+            // Usuario SIN pareja: Crear transacción individual automáticamente (comportamiento original)
+            console.log(`👤 Usuario sin pareja, creando gasto individual automáticamente`);
+
+            const transaction = await createTransaction({
+                user_phone: normalizedPhone,
+                category_id: category.id,
+                type: 'expense',
+                amount: data.amount,
+                description: data.description || `Compra en ${data.merchant || 'comercio'}`,
+                transaction_date: data.date || getTodayMexico()
+            });
+
+            // Guardar registro de imagen
+            await saveReceiptImage({
+                user_phone: normalizedPhone,
+                whatsapp_media_id: mediaId,
+                media_url: media.url,
+                ocr_result: data,
+                transaction_id: transaction.id,
+                status: 'processed'
+            });
+
+            // Confirmar al usuario
+            const response = `✅ ¡Listo! Registré un gasto de $${data.amount} en ${data.category} 📸
+
+"${data.description || data.merchant || ''}"`;
+
+            await sendWhatsAppMessage(user_phone, response);
+
+            // Guardar en chat history
+            await saveChatMessage({
+                user_phone: normalizedPhone,
+                role: 'assistant',
+                message: response,
+                intent_json: null
+            });
+
+            console.log(`✅ Transacción creada desde imagen: ${transaction.id}`);
+        }
 
     } catch (error) {
         console.error('❌ Error procesando imagen de WhatsApp:', error);
