@@ -19,16 +19,14 @@ export function seedTestData() {
             VALUES (?, ?)
         `).run(userPhone, 'Usuario');
 
-        // 2. Obtener IDs de categorías
+        // 2. Obtener IDs de categorías de gastos
         const comidaId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Comida').id;
         const transporteId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Transporte').id;
         const entretenimientoId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Entretenimiento').id;
         const serviciosId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Servicios').id;
-        const nominaId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Nómina').id;
-        const ventasId = db.prepare('SELECT id FROM categories WHERE name = ?').get('Ventas').id;
 
-        // 3. Agregar transacciones de prueba
-        console.log('💰 Agregando transacciones de prueba...');
+        // 3. Agregar gastos de prueba
+        console.log('💰 Agregando gastos de prueba...');
 
         const transactions = [
             // Mes actual - Gastos
@@ -41,17 +39,10 @@ export function seedTestData() {
             { date: getDateOffset(-6), type: 'expense', category_id: transporteId, amount: 150, description: 'Gasolina' },
             { date: getDateOffset(-7), type: 'expense', category_id: comidaId, amount: 420, description: 'Supermercado' },
 
-            // Mes actual - Ingresos
-            { date: getDateOffset(-1), type: 'income', category_id: nominaId, amount: 15000, description: 'Quincena' },
-            { date: getDateOffset(-10), type: 'income', category_id: ventasId, amount: 3500, description: 'Venta de artículo' },
-
             // Mes pasado - Gastos
             { date: getDateOffset(-35), type: 'expense', category_id: comidaId, amount: 1200, description: 'Comida del mes' },
             { date: getDateOffset(-38), type: 'expense', category_id: transporteId, amount: 800, description: 'Transporte' },
             { date: getDateOffset(-40), type: 'expense', category_id: serviciosId, amount: 1500, description: 'Servicios' },
-
-            // Mes pasado - Ingresos
-            { date: getDateOffset(-30), type: 'income', category_id: nominaId, amount: 15000, description: 'Nómina' },
         ];
 
         const stmt = db.prepare(`
@@ -63,23 +54,20 @@ export function seedTestData() {
             stmt.run(userPhone, t.category_id, t.type, t.amount, t.description, t.date);
         });
 
-        console.log(`✅ ${transactions.length} transacciones agregadas\n`);
+        console.log(`✅ ${transactions.length} gastos agregados\n`);
 
         // 4. Mostrar resumen
         const summary = db.prepare(`
             SELECT
-                SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as total_income,
-                SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as total_expense,
+                SUM(amount) as total_expense,
                 COUNT(*) as total_transactions
             FROM transactions
-            WHERE user_phone = ?
+            WHERE user_phone = ? AND type = 'expense'
         `).get(userPhone);
 
         console.log('📊 Resumen de datos de prueba:');
-        console.log(`   💵 Ingresos totales: $${summary.total_income}`);
-        console.log(`   💸 Gastos totales: $${summary.total_expense}`);
-        console.log(`   📝 Transacciones: ${summary.total_transactions}`);
-        console.log(`   💰 Balance: $${summary.total_income - summary.total_expense}\n`);
+        console.log(`   💸 Total gastado: $${summary.total_expense}`);
+        console.log(`   📝 Transacciones: ${summary.total_transactions}\n`);
 
         console.log('✅ Datos de prueba agregados correctamente\n');
 

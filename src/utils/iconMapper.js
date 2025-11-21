@@ -124,29 +124,22 @@ const iconKeywords = {
     'multa|fine': '⚠️',
     'seguro|insurance': '🛡️',
     'freelance|autonomo|autónomo': '💻',
-    'venta|sale|selling': '🤝',
-    'nomina|nómina|sueldo|salario': '💰',
-    'propina|tip': '💵',
-    'lottery|loteria|lotería': '🎰',
 };
 
 /**
- * Iconos por defecto según el tipo de categoría
+ * Icono por defecto para categorías de gastos
  */
-const defaultIcons = {
-    expense: '📦',
-    income: '💵'
-};
+const defaultIcon = '📦';
 
 /**
  * Selecciona automáticamente el icono más apropiado para una categoría
  * @param {string} categoryName - Nombre de la categoría
- * @param {string} type - Tipo de categoría (income/expense)
+ * @param {string} type - Tipo de categoría (siempre 'expense')
  * @returns {string} Emoji seleccionado
  */
 export function selectIcon(categoryName, type) {
     if (!categoryName) {
-        return defaultIcons[type] || defaultIcons.expense;
+        return defaultIcon;
     }
 
     const lowerName = categoryName.toLowerCase().trim();
@@ -164,18 +157,15 @@ export function selectIcon(categoryName, type) {
     }
 
     // Si no se encuentra coincidencia, retornar icono por defecto
-    return defaultIcons[type] || defaultIcons.expense;
+    return defaultIcon;
 }
 
 /**
- * Selecciona un color automático basado en el tipo
- * @param {string} type - Tipo de categoría (income/expense)
+ * Selecciona un color automático para categorías de gastos
+ * @param {string} type - Tipo de categoría (siempre 'expense')
  * @returns {string} Color en formato hexadecimal
  */
 export function selectColor(type) {
-    // Colores para ingresos (tonos verdes)
-    const incomeColors = ['#22C55E', '#14B8A6', '#10B981', '#059669'];
-
     // Colores para gastos (variados)
     const expenseColors = [
         '#EF4444', // rojo
@@ -187,13 +177,8 @@ export function selectColor(type) {
         '#6366F1', // indigo
     ];
 
-    if (type === 'income') {
-        // Seleccionar color aleatorio de ingresos
-        return incomeColors[Math.floor(Math.random() * incomeColors.length)];
-    } else {
-        // Seleccionar color aleatorio de gastos
-        return expenseColors[Math.floor(Math.random() * expenseColors.length)];
-    }
+    // Seleccionar color aleatorio de gastos
+    return expenseColors[Math.floor(Math.random() * expenseColors.length)];
 }
 
 export default {

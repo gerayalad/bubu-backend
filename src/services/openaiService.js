@@ -18,14 +18,14 @@ async function getOpenAIFunctions() {
     return [
         {
             name: 'registrar_transaccion',
-            description: 'Registra un gasto o ingreso del usuario DIRECTAMENTE (sin confirmación). Usa esta función cuando el usuario mencione que gastó dinero, pagó algo, recibió dinero, le pagaron, etc. IMPORTANTE: Usa confirmar_transaccion para webchat con confirmación. GASTOS COMPARTIDOS: Detecta si dice "pagué yo", "pagó mi pareja", "pago yo", "paga mi pareja", "50/50", "partes iguales", "mitad", "40/60", etc.',
+            description: 'Registra un gasto del usuario DIRECTAMENTE (sin confirmación). Usa esta función cuando el usuario mencione que gastó dinero o pagó algo. IMPORTANTE: Usa confirmar_transaccion para webchat con confirmación. GASTOS COMPARTIDOS: Detecta si dice "pagué yo", "pagó mi pareja", "pago yo", "paga mi pareja", "50/50", "partes iguales", "mitad", "40/60", etc.',
             parameters: {
                 type: 'object',
                 properties: {
                     tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso'],
-                        description: 'Tipo de transacción: "gasto" si es un egreso, "ingreso" si es dinero recibido'
+                        enum: ['gasto'],
+                        description: 'Tipo de transacción: siempre "gasto"'
                     },
                     monto: {
                         type: 'number',
@@ -67,7 +67,7 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'consultar_estado',
-            description: 'Consulta el estado financiero del usuario. Usa esta función cuando el usuario pregunte cómo va, cuál es su estado, cuánto ha gastado, cuánto ha ganado, etc.',
+            description: 'Consulta el estado financiero del usuario. Usa esta función cuando el usuario pregunte cómo va, cuál es su estado, o cuánto ha gastado.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -91,8 +91,8 @@ async function getOpenAIFunctions() {
                     },
                     filtro_tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso', null],
-                        description: 'Filtrar solo gastos o solo ingresos. null para ambos'
+                        enum: ['gasto', null],
+                        description: 'Siempre "gasto" (mantenido para compatibilidad)'
                     }
                 },
                 required: ['periodo']
@@ -111,8 +111,8 @@ async function getOpenAIFunctions() {
                     },
                     tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso', 'todos'],
-                        description: 'Filtrar por tipo de transacción'
+                        enum: ['gasto', 'todos'],
+                        description: 'Siempre "gasto" (mantenido "todos" para compatibilidad)'
                     },
                     periodo: {
                         type: 'string',
@@ -175,15 +175,15 @@ async function getOpenAIFunctions() {
                 properties: {
                     tipo_categoria: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso', 'todas', 'personalizadas'],
-                        description: 'Tipo de categorías a mostrar. "todas" muestra todas las categorías (predefinidas y personalizadas), "personalizadas" solo las creadas por el usuario, "gasto" solo categorías de gastos, "ingreso" solo categorías de ingresos.'
+                        enum: ['gasto', 'todas', 'personalizadas'],
+                        description: 'Tipo de categorías a mostrar. "todas" muestra todas las categorías (predefinidas y personalizadas), "personalizadas" solo las creadas por el usuario, "gasto" categorías de gastos.'
                     }
                 }
             }
         },
         {
             name: 'crear_categoria',
-            description: 'Crea una nueva categoría personalizada. Usa esta cuando el usuario pida explícitamente crear una categoría nueva. Ejemplos: "crea una categoría de gastos llamada Mascotas", "crea categoría Freelance de ingresos", "nueva categoría Cafetería para gastos".',
+            description: 'Crea una nueva categoría personalizada de gastos. Usa esta cuando el usuario pida explícitamente crear una categoría nueva. Ejemplos: "crea una categoría llamada Mascotas", "nueva categoría Cafetería", "crea categoría Gimnasio".',
             parameters: {
                 type: 'object',
                 properties: {
@@ -193,8 +193,8 @@ async function getOpenAIFunctions() {
                     },
                     tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso'],
-                        description: 'Tipo de categoría: "gasto" para categorías de gastos, "ingreso" para categorías de ingresos'
+                        enum: ['gasto'],
+                        description: 'Siempre "gasto"'
                     }
                 },
                 required: ['nombre', 'tipo']
@@ -228,7 +228,7 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'eliminar_categoria',
-            description: 'Elimina una categoría personalizada. Las transacciones asociadas se moverán automáticamente a "Otros Gastos" u "Otros Ingresos". Usa esta cuando el usuario pida eliminar/borrar una categoría. Ejemplos: "elimina la categoría AI Tools", "borra la categoría Mascotas", "quita la categoría Freelance".',
+            description: 'Elimina una categoría personalizada. Las transacciones asociadas se moverán automáticamente a "Otros Gastos". Usa esta cuando el usuario pida eliminar/borrar una categoría. Ejemplos: "elimina la categoría AI Tools", "borra la categoría Mascotas", "quita la categoría Freelance".',
             parameters: {
                 type: 'object',
                 properties: {
@@ -256,8 +256,8 @@ async function getOpenAIFunctions() {
                     },
                     tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso'],
-                        description: 'Tipo de transacciones a mover (gasto o ingreso). Infiere del contexto.'
+                        enum: ['gasto'],
+                        description: 'Siempre "gasto"'
                     }
                 },
                 required: ['categoria_origen', 'categoria_destino', 'tipo']
@@ -330,14 +330,14 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'confirmar_transaccion',
-            description: 'Prepara una transacción para confirmación del usuario (NO la guarda todavía). Usa esta función cuando el usuario mencione un gasto o ingreso nuevo. Ejemplos: "gasté 319 en Disney Plus", "pagué 150 de comida", "recibí 1000 de mi salario".',
+            description: 'Prepara una transacción para confirmación del usuario (NO la guarda todavía). Usa esta función cuando el usuario mencione un gasto nuevo. Ejemplos: "gasté 319 en Disney Plus", "pagué 150 de comida".',
             parameters: {
                 type: 'object',
                 properties: {
                     tipo: {
                         type: 'string',
-                        enum: ['gasto', 'ingreso'],
-                        description: 'Tipo de transacción: "gasto" si es un egreso, "ingreso" si es dinero recibido'
+                        enum: ['gasto'],
+                        description: 'Siempre "gasto"'
                     },
                     monto: {
                         type: 'number',
@@ -571,10 +571,10 @@ Cuando el usuario mencione fechas relativas (ayer, hoy, antier, etc.), calcula l
 
 Ejemplos de interpretación:
 
-REGISTRAR TRANSACCIONES:
+REGISTRAR GASTOS:
 - "gasté 350 en tacos" → registrar_transaccion (tipo: gasto, monto: 350, categoria: Comida)
 - "ayer pagué 200 de uber" → registrar_transaccion (tipo: gasto, monto: 200, categoria: Transporte, fecha: ayer)
-- "me cayó la nómina de 15000" → registrar_transaccion (tipo: ingreso, monto: 15000, categoria: Nómina)
+- "pagué 500 en el súper" → registrar_transaccion (tipo: gasto, monto: 500, categoria: Comida)
 
 CONSULTAR ESTADO - MES ACTUAL:
 - "¿cómo voy este mes?" → consultar_estado (periodo: mes_actual)
@@ -592,16 +592,16 @@ CONSULTAR ESTADO - MES PASADO:
 CONSULTAR ESTADO - OTROS PERIODOS:
 - "¿cómo voy esta semana?" → consultar_estado (periodo: semana_actual)
 - "gastos de hoy" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
-- "¿cuánto gané esta semana?" → consultar_estado (periodo: semana_actual, filtro_tipo: ingreso)
+- "¿cuánto gasté esta semana?" → consultar_estado (periodo: semana_actual, filtro_tipo: gasto)
 
-LISTAR TRANSACCIONES DETALLE (cuando quieren VER la lista específica):
+LISTAR GASTOS DETALLE (cuando quieren VER la lista específica):
 - "¿qué servicios tengo registrados?" → listar_transacciones (categoria: Servicios, tipo: gasto, periodo: todos)
 - "muestra mis gastos en comida" → listar_transacciones (categoria: Comida, tipo: gasto, periodo: todos)
 - "ver mis gastos de transporte" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: todos)
-- "lista mis ingresos" → listar_transacciones (tipo: ingreso, periodo: todos)
 - "qué gastos tengo en comida del mes pasado" → listar_transacciones (categoria: Comida, tipo: gasto, periodo: mes_pasado)
 - "muestra los servicios de este mes" → listar_transacciones (categoria: Servicios, tipo: gasto, periodo: mes_actual)
-- "ver transacciones de transporte de la semana" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: semana_actual)
+- "ver gastos de transporte de la semana" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: semana_actual)
+- "lista todos mis gastos" → listar_transacciones (tipo: gasto, periodo: todos)
 
 ELIMINAR TRANSACCIONES:
 - "elimina el 1" → eliminar_transaccion (numero: 1)
@@ -618,17 +618,17 @@ EDITAR TRANSACCIONES:
 CONSULTAR CATEGORÍAS:
 - "¿qué categorías existen?" → consultar_categorias (tipo_categoria: todas)
 - "¿en qué puedo gastar?" → consultar_categorias (tipo_categoria: gasto)
-- "¿cuáles son las categorías de ingresos?" → consultar_categorias (tipo_categoria: ingreso)
 - "muéstrame las categorías" → consultar_categorias (tipo_categoria: todas)
 - "¿qué categorías personalizadas tengo?" → consultar_categorias (tipo_categoria: personalizadas)
 - "muestra mis categorías" → consultar_categorias (tipo_categoria: personalizadas)
+- "lista todas las categorías" → consultar_categorias (tipo_categoria: todas)
 
 CREAR CATEGORÍAS PERSONALIZADAS:
-- "crea una categoría de gastos llamada Mascotas" → crear_categoria (nombre: Mascotas, tipo: gasto)
-- "crea categoría Freelance de ingresos" → crear_categoria (nombre: Freelance, tipo: ingreso)
-- "nueva categoría Cafetería para gastos" → crear_categoria (nombre: Cafetería, tipo: gasto)
+- "crea una categoría llamada Mascotas" → crear_categoria (nombre: Mascotas, tipo: gasto)
+- "nueva categoría Cafetería" → crear_categoria (nombre: Cafetería, tipo: gasto)
 - "crea categoría gimnasio" → crear_categoria (nombre: Gimnasio, tipo: gasto)
-- "quiero una categoría de ingresos que se llame Propinas" → crear_categoria (nombre: Propinas, tipo: ingreso)
+- "quiero una categoría que se llame Videojuegos" → crear_categoria (nombre: Videojuegos, tipo: gasto)
+- "crea categoría Mascotas para gastos" → crear_categoria (nombre: Mascotas, tipo: gasto)
 
 EDITAR CATEGORÍAS PERSONALIZADAS:
 - "cambia el nombre de la categoría AI Tools a HappyToHelp" → editar_categoria (nombre_actual: AI Tools, nombre_nuevo: HappyToHelp)
@@ -642,11 +642,11 @@ ELIMINAR CATEGORÍAS PERSONALIZADAS:
 - "quita la categoría Freelance" → eliminar_categoria (nombre: Freelance)
 - "eliminar categoría Gimnasio" → eliminar_categoria (nombre: Gimnasio)
 
-MOVER TRANSACCIONES ENTRE CATEGORÍAS:
+MOVER GASTOS ENTRE CATEGORÍAS:
 - "mueve todos los gastos de Entretenimiento a Casino" → mover_transacciones_categoria (categoria_origen: Entretenimiento, categoria_destino: Casino, tipo: gasto)
 - "pasa las transacciones de Comida a Restaurantes" → mover_transacciones_categoria (categoria_origen: Comida, categoria_destino: Restaurantes, tipo: gasto)
 - "cambia todos los gastos de AI Tools a HappyToHelp" → mover_transacciones_categoria (categoria_origen: AI Tools, categoria_destino: HappyToHelp, tipo: gasto)
-- "mueve los ingresos de Ventas a Freelance" → mover_transacciones_categoria (categoria_origen: Ventas, categoria_destino: Freelance, tipo: ingreso)
+- "mueve los gastos de Servicios a Hogar" → mover_transacciones_categoria (categoria_origen: Servicios, categoria_destino: Hogar, tipo: gasto)
 
 AYUDA / INSTRUCCIONES:
 - "quiero registrar un gasto" → ayuda_uso (tipo_ayuda: registrar)
@@ -759,8 +759,8 @@ Genera una confirmación breve y clara (2-3 líneas) que:
 Ejemplo: "✅ Registré el gasto compartido de $${result.total_amount} en ${result.category_name}. ${whoPaid === 'tú' ? 'Tú pagaste' : 'Tu pareja pagó'} todo, pero se divide: tú ${result.user_percentage}% ($${result.user_amount}) y tu pareja ${result.partner_percentage}% ($${result.partner_amount})."`;
                 } else {
                     // Gasto individual
-                    let basePrompt = `El usuario registró una transacción: ${JSON.stringify(result)}.
-Genera una confirmación breve y amigable (1-2 líneas) confirmando que se registró el ${result.type === 'expense' ? 'gasto' : 'ingreso'} de $${result.amount} en ${result.category_name}.`;
+                    let basePrompt = `El usuario registró un gasto: ${JSON.stringify(result)}.
+Genera una confirmación breve y amigable (1-2 líneas) confirmando que se registró el gasto de $${result.amount} en ${result.category_name}.`;
 
                     // Si sugirió compartir pero no tiene pareja, agregar sugerencia
                     if (result.suggest_partner) {
@@ -788,38 +788,35 @@ Agrega al final (en una línea separada con emoji 💡) una sugerencia amigable 
                 };
 
                 const periodoDescripcion = periodoTexto[summary.periodo] || 'en el periodo consultado';
-                const hasData = summary.totals.income > 0 || summary.totals.expense > 0;
+                const hasData = summary.totals.expense > 0;
 
                 if (!hasData) {
                     // Caso especial: No hay datos
-                    prompt = `El usuario consultó su estado financiero de ${periodoDescripcion}, pero NO HAY DATOS registrados aún.
+                    prompt = `El usuario consultó su estado de gastos de ${periodoDescripcion}, pero NO HAY DATOS registrados aún.
 
 Genera una respuesta amigable y útil (2-3 líneas) que:
-1. Mencione que aún no ha registrado movimientos en ${periodoDescripcion}
+1. Mencione que aún no ha registrado gastos en ${periodoDescripcion}
 2. Lo invite a empezar a registrar
 3. Le dé un ejemplo de cómo hacerlo
 
-Ejemplo: "Aún no has registrado movimientos ${periodoDescripcion}. ¡Empecemos! Puedes decirme algo como: 'gasté 500 en comida' o 'me llegó la nómina de 15000' 💰"`;
+Ejemplo: "Aún no has registrado gastos ${periodoDescripcion}. ¡Empecemos! Puedes decirme algo como: 'gasté 500 en comida' o 'pagué 200 de uber' 💰"`;
                 } else {
                     // Caso normal: Hay datos
-                    prompt = `El usuario consultó su estado financiero de ${periodoDescripcion}.
+                    prompt = `El usuario consultó su estado de gastos de ${periodoDescripcion}.
 
 Periodo: ${periodoDescripcion}
 Fechas: ${summary.period.startDate} al ${summary.period.endDate}
-Ingresos: $${summary.totals.income}
-Gastos: $${summary.totals.expense}
-Balance: $${summary.totals.balance}
+Total gastado: $${summary.totals.expense}
 
-Genera un resumen conversacional (3-4 líneas) que:
+Genera un resumen conversacional (2-3 líneas) que:
 1. IMPORTANTE: Mencione claramente el periodo temporal (${periodoDescripcion}) en la primera frase
-2. Mencione los totales de ingresos y gastos
-3. Indique el balance (positivo o negativo)
-4. Si hay categorías, menciona las 2 principales donde más gastó
-5. Sea amigable y motivador
+2. Mencione el total gastado
+3. Si hay categorías, menciona las 2 principales donde más gastó
+4. Sea amigable y motivador
 
 Categorías principales: ${JSON.stringify(summary.byCategory.slice(0, 3))}
 
-Ejemplo: "${periodoDescripcion === 'el mes pasado' ? 'El mes pasado' : periodoDescripcion === 'este mes' ? 'En lo que va de este mes' : periodoDescripcion === 'hoy' ? 'El día de hoy' : 'En el periodo consultado'} tuviste ingresos de $${summary.totals.income} y gastos de $${summary.totals.expense}. Tu balance es de $${summary.totals.balance}."`;
+Ejemplo: "${periodoDescripcion === 'el mes pasado' ? 'El mes pasado' : periodoDescripcion === 'este mes' ? 'En lo que va de este mes' : periodoDescripcion === 'hoy' ? 'El día de hoy' : 'En el periodo consultado'} gastaste $${summary.totals.expense}. Tus principales gastos fueron en ${summary.byCategory[0]?.category || 'varias categorías'}."`;
                 }
                 break;
 

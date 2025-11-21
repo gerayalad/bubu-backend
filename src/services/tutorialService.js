@@ -12,36 +12,27 @@ import { getAllCategories } from './categoryService.js';
 export async function getTutorialMessage() {
     const categories = await getAllCategories();
 
-    // Separar categorías por tipo
+    // Solo categorías de gastos
     const expenseCategories = categories
         .filter(c => c.type === 'expense')
         .map(c => c.name)
         .join(', ');
 
-    const incomeCategories = categories
-        .filter(c => c.type === 'income')
-        .map(c => c.name)
-        .join(', ');
-
     return `¡Bienvenido a BUBU! 🤖💰
 
-Soy tu asistente de finanzas personales. Puedo ayudarte a:
+Soy tu asistente para rastrear gastos. Puedo ayudarte a:
 
 📊 *REGISTRAR GASTOS:*
 • "Gasté 350 en tacos"
 • "Pagué 1200 de luz"
 • "Ayer compré ropa por 800"
 
-💰 *REGISTRAR INGRESOS:*
-• "Me pagaron 15000 de nómina"
-• "Vendí algo por 3500"
-
 📈 *CONSULTAR ESTADO:*
 • "¿Cómo voy este mes?"
 • "¿Cuánto he gastado?"
 • "Gastos del mes pasado"
 
-📋 *VER TRANSACCIONES:*
+📋 *VER GASTOS:*
 • "¿Qué gastos tengo en comida?"
 • "Muestra mis servicios"
 
@@ -60,15 +51,12 @@ Comparte gastos con tu pareja o roommate:
 • "Lista gastos compartidos"
 • "Cambia la división a 65/35"
 
-🏷️ *CATEGORÍAS DE GASTOS:*
+🏷️ *CATEGORÍAS DISPONIBLES:*
 ${expenseCategories}
 
-💵 *CATEGORÍAS DE INGRESOS:*
-${incomeCategories}
-
 ✨ *GESTIONAR CATEGORÍAS PERSONALIZADAS:*
-• "Crea una categoría de gastos llamada Mascotas"
-• "Crea categoría Freelance de ingresos"
+• "Crea una categoría llamada Mascotas"
+• "Crea categoría Gimnasio"
 • "Cambia el nombre de la categoría AI Tools a HappyToHelp"
 • "Elimina la categoría Mascotas"
 • "Mueve todos los gastos de Entretenimiento a Casino"
