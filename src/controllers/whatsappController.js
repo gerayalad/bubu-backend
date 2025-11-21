@@ -25,6 +25,18 @@ import { getTutorialMessage } from '../services/tutorialService.js';
 import { downloadWhatsAppMedia } from '../services/whatsappMediaService.js';
 import { extractReceiptData, validateReceiptData } from '../services/ocrService.js';
 import { saveReceiptImage } from '../services/receiptService.js';
+import { createRelationship, getRelationship, updateDefaultSplitByPhone, acceptRelationshipByPhone, rejectRelationshipByPhone } from '../services/relationshipService.js';
+import { createSharedTransaction, getSharedTransactions } from '../services/sharedTransactionService.js';
+import { calculateBalance, getSharedTransactionsForBalance } from '../services/balanceService.js';
+import { notifyRelationshipRequest, notifyRelationshipAccepted, notifyRelationshipRejected, notifyPartnerOfSharedExpense, notifyDivisionUpdated } from '../services/notificationService.js';
+import {
+    handleRegistrarPareja,
+    handleConsultarBalance,
+    handleListarGastosCompartidos,
+    handleActualizarDivisionDefault,
+    handleAceptarSolicitudPareja,
+    handleRechazarSolicitudPareja
+} from './chatController.js';
 
 /**
  * Webhook de verificación de WhatsApp
@@ -303,6 +315,37 @@ async function processWhatsAppMessage(user_phone, message) {
             case 'ayuda_uso':
                 result = null;
                 response = handleAyudaUso(intent.parameters);
+                break;
+
+            // ========== GASTOS COMPARTIDOS ==========
+            case 'registrar_pareja':
+                result = await handleRegistrarPareja(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'consultar_balance':
+                result = await handleConsultarBalance(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'listar_gastos_compartidos':
+                result = await handleListarGastosCompartidos(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'actualizar_division_default':
+                result = await handleActualizarDivisionDefault(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'aceptar_solicitud_pareja':
+                result = await handleAceptarSolicitudPareja(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
+            case 'rechazar_solicitud_pareja':
+                result = await handleRechazarSolicitudPareja(normalizedPhone, intent.parameters);
+                response = result.response;
                 break;
 
             case 'conversacion_general':

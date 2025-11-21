@@ -2060,6 +2060,16 @@ No compartirás gastos con ${requester_phone}. Puedes seguir usando BUBU normalm
     }
 }
 
+// Named exports for WhatsApp controller
+export {
+    handleRegistrarPareja,
+    handleConsultarBalance,
+    handleListarGastosCompartidos,
+    handleActualizarDivisionDefault,
+    handleAceptarSolicitudPareja,
+    handleRechazarSolicitudPareja
+};
+
 export default {
     processMessage,
     getHistory,
