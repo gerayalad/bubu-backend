@@ -1,13 +1,13 @@
 /**
  * BUBU - Category Service
- * Gestión de categorías de ingresos y gastos
+ * Gestión de categorías de gastos
  */
 
 import { query, queryOne, execute } from '../db/connection.js';
 
 /**
- * Obtiene todas las categorías
- * @param {string} type - Filtro opcional por tipo (income/expense)
+ * Obtiene todas las categorías de gastos
+ * @param {string} type - Tipo (siempre 'expense')
  * @returns {Array} Lista de categorías
  */
 export async function getAllCategories(type = null) {
@@ -48,8 +48,8 @@ export async function createCategory(data) {
         throw new Error('El nombre y tipo son requeridos');
     }
 
-    if (!['income', 'expense'].includes(type)) {
-        throw new Error('Tipo inválido. Debe ser "income" o "expense"');
+    if (type !== 'expense') {
+        throw new Error('Tipo inválido. Solo se permiten categorías de gastos (type debe ser "expense")');
     }
 
     const result = await execute(
@@ -63,45 +63,35 @@ export async function createCategory(data) {
 
 /**
  * Busca la categoría más apropiada usando palabras clave
- * @param {string} description - Descripción del gasto/ingreso
- * @param {string} type - Tipo (income/expense)
+ * @param {string} description - Descripción del gasto
+ * @param {string} type - Tipo (siempre 'expense')
  * @returns {object|null} Categoría sugerida
  */
-export async function suggestCategory(description, type) {
+export async function suggestCategory(description, type = 'expense') {
     const lowerDesc = description.toLowerCase();
 
-    // Mapeo de palabras clave a categorías
+    // Mapeo de palabras clave a categorías (solo gastos)
     const keywords = {
-        expense: {
-            'Comida': ['comida', 'taco', 'restaurante', 'cena', 'desayuno', 'almuerzo', 'comí', 'pizza', 'hamburguesa', 'café'],
-            'Transporte': ['uber', 'taxi', 'gasolina', 'transporte', 'metro', 'autobús', 'parking'],
-            'Entretenimiento': ['cine', 'netflix', 'spotify', 'juego', 'concierto', 'fiesta', 'bar'],
-            'Servicios': ['luz', 'agua', 'internet', 'teléfono', 'netflix', 'spotify', 'servicio'],
-            'Salud': ['doctor', 'medicamento', 'farmacia', 'hospital', 'dentista', 'consulta'],
-            'Educación': ['curso', 'libro', 'escuela', 'universidad', 'clase'],
-            'Ropa': ['ropa', 'zapatos', 'camisa', 'pantalón', 'vestido'],
-            'Hogar': ['renta', 'mueble', 'decoración', 'limpieza', 'hogar']
-        },
-        income: {
-            'Nómina': ['nómina', 'sueldo', 'salario', 'pago', 'quincena'],
-            'Ventas': ['venta', 'vendí', 'cliente', 'cobro'],
-            'Inversiones': ['inversión', 'dividendo', 'interés', 'ganancia']
-        }
+        'Comida': ['comida', 'taco', 'restaurante', 'cena', 'desayuno', 'almuerzo', 'comí', 'pizza', 'hamburguesa', 'café'],
+        'Transporte': ['uber', 'taxi', 'gasolina', 'transporte', 'metro', 'autobús', 'parking'],
+        'Entretenimiento': ['cine', 'netflix', 'spotify', 'juego', 'concierto', 'fiesta', 'bar'],
+        'Servicios': ['luz', 'agua', 'internet', 'teléfono', 'netflix', 'spotify', 'servicio'],
+        'Salud': ['doctor', 'medicamento', 'farmacia', 'hospital', 'dentista', 'consulta'],
+        'Educación': ['curso', 'libro', 'escuela', 'universidad', 'clase'],
+        'Ropa': ['ropa', 'zapatos', 'camisa', 'pantalón', 'vestido'],
+        'Hogar': ['renta', 'mueble', 'decoración', 'limpieza', 'hogar']
     };
 
     // Buscar coincidencias en palabras clave
-    const typeKeywords = keywords[type] || {};
-
-    for (const [categoryName, words] of Object.entries(typeKeywords)) {
+    for (const [categoryName, words] of Object.entries(keywords)) {
         if (words.some(word => lowerDesc.includes(word))) {
             const category = await getCategoryByName(categoryName);
             if (category) return category;
         }
     }
 
-    // Si no se encuentra, retornar categoría "Otros"
-    const fallbackName = type === 'expense' ? 'Otros Gastos' : 'Otros Ingresos';
-    return await getCategoryByName(fallbackName);
+    // Si no se encuentra, retornar categoría "Otros Gastos"
+    return await getCategoryByName('Otros Gastos');
 }
 
 /**

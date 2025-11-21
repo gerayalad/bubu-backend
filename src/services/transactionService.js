@@ -1,6 +1,6 @@
 /**
  * BUBU - Transaction Service
- * Gestión de transacciones (ingresos y gastos)
+ * Gestión de transacciones de gastos
  */
 
 import { query, queryOne, execute } from '../db/connection.js';
@@ -19,8 +19,8 @@ export async function createTransaction(data) {
         throw new Error('Faltan datos obligatorios: user_phone, category_id, type, amount');
     }
 
-    if (!['income', 'expense'].includes(type)) {
-        throw new Error('Tipo inválido. Debe ser "income" o "expense"');
+    if (type !== 'expense') {
+        throw new Error('Tipo inválido. Solo se permiten gastos (type debe ser "expense")');
     }
 
     if (amount <= 0) {
@@ -110,7 +110,7 @@ export async function getUserTransactions(user_phone, filters = {}) {
  * Obtiene el resumen financiero de un usuario
  * @param {string} user_phone - Teléfono del usuario
  * @param {object} period - Periodo (startDate, endDate)
- * @returns {object} Resumen con totales de ingresos, gastos y balance
+ * @returns {object} Resumen con totales de gastos
  */
 export async function getFinancialSummary(user_phone, period = {}) {
     // Si no se especifica periodo, usar el mes actual en zona horaria de México
@@ -119,19 +119,18 @@ export async function getFinancialSummary(user_phone, period = {}) {
         period.endDate = getEndOfMonthMexico();
     }
 
-    // Calcular totales
+    // Calcular totales (solo gastos)
     const summary = await queryOne(`
         SELECT
-            SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END) as total_income,
-            SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END) as total_expense,
-            COUNT(CASE WHEN type = 'income' THEN 1 END) as income_count,
-            COUNT(CASE WHEN type = 'expense' THEN 1 END) as expense_count
+            SUM(amount) as total_expense,
+            COUNT(*) as expense_count
         FROM transactions
         WHERE user_phone = $1
         AND transaction_date BETWEEN $2 AND $3
+        AND type = 'expense'
     `, [user_phone, period.startDate, period.endDate]);
 
-    // Calcular por categoría
+    // Calcular por categoría (solo gastos)
     const byCategory = await query(`
         SELECT
             c.name as category,
@@ -144,13 +143,12 @@ export async function getFinancialSummary(user_phone, period = {}) {
         JOIN categories c ON t.category_id = c.id
         WHERE t.user_phone = $1
         AND t.transaction_date BETWEEN $2 AND $3
+        AND t.type = 'expense'
         GROUP BY c.id, c.name, c.icon, c.color, t.type
         ORDER BY total DESC
     `, [user_phone, period.startDate, period.endDate]);
 
-    const totalIncome = summary.total_income || 0;
     const totalExpense = summary.total_expense || 0;
-    const balance = totalIncome - totalExpense;
 
     return {
         period: {
@@ -158,12 +156,10 @@ export async function getFinancialSummary(user_phone, period = {}) {
             endDate: period.endDate
         },
         totals: {
-            income: totalIncome,
             expense: totalExpense,
-            balance: balance
+            total_spent: totalExpense  // Alias más claro para UI
         },
         counts: {
-            income: summary.income_count || 0,
             expense: summary.expense_count || 0
         },
         byCategory: byCategory
