@@ -207,6 +207,32 @@ export async function deleteCategory(id) {
     };
 }
 
+/**
+ * Mueve todas las transacciones de una categoría a otra
+ * @param {number} fromCategoryId - ID de la categoría origen
+ * @param {number} toCategoryId - ID de la categoría destino
+ * @param {string} userPhone - Teléfono del usuario (opcional, para filtrar)
+ * @returns {object} Resultado del movimiento
+ */
+export async function moveTransactionsBetweenCategories(fromCategoryId, toCategoryId, userPhone = null) {
+    let updateQuery = 'UPDATE transactions SET category_id = $1 WHERE category_id = $2';
+    let params = [toCategoryId, fromCategoryId];
+
+    // Si se proporciona userPhone, filtrar por usuario
+    if (userPhone) {
+        updateQuery += ' AND user_phone = $3';
+        params.push(userPhone);
+    }
+
+    const result = await execute(updateQuery, params);
+
+    return {
+        movedCount: result.rowCount || 0,
+        fromCategoryId,
+        toCategoryId
+    };
+}
+
 export default {
     getAllCategories,
     getCategoryById,
@@ -214,5 +240,6 @@ export default {
     createCategory,
     updateCategory,
     deleteCategory,
-    suggestCategory
+    suggestCategory,
+    moveTransactionsBetweenCategories
 };
