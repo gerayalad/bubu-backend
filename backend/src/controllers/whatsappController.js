@@ -238,6 +238,9 @@ async function processWhatsAppMessage(user_phone, message) {
         let result;
         let response;
 
+        console.log(`🎯 [DEBUG] intent.action detectado: "${intent.action}"`);
+        console.log(`📦 [DEBUG] intent.parameters:`, JSON.stringify(intent.parameters, null, 2));
+
         switch (intent.action) {
             case 'confirmar_transaccion':
                 result = await handleConfirmarTransaccion(normalizedPhone, user_phone, intent.parameters);
@@ -316,8 +319,11 @@ async function processWhatsAppMessage(user_phone, message) {
                 break;
 
             case 'crear_categoria':
+                console.log(`✨ [DEBUG] Ejecutando handleCrearCategoria con params:`, intent.parameters);
                 result = await handleCrearCategoria(intent.parameters);
+                console.log(`✅ [DEBUG] Resultado de handleCrearCategoria:`, result);
                 response = result.response;
+                console.log(`💬 [DEBUG] Respuesta a enviar: "${response}"`);
                 break;
 
             case 'editar_categoria':
@@ -1575,24 +1581,33 @@ async function processAudioMessage(user_phone, mediaId, mimeType, messageId) {
  * Maneja la creación de una categoría personalizada
  */
 async function handleCrearCategoria(params) {
+    console.log(`🏷️ [handleCrearCategoria] Iniciando con params:`, params);
     const { nombre, tipo } = params;
+    console.log(`🏷️ [handleCrearCategoria] nombre: "${nombre}", tipo: "${tipo}"`);
 
     // Convertir tipo a formato de BD (solo expense, no hay income)
     const type = 'expense';
 
     // Verificar si la categoría ya existe
+    console.log(`🔍 [handleCrearCategoria] Verificando si existe categoría "${nombre}"...`);
     const existing = await getCategoryByName(nombre);
+    console.log(`🔍 [handleCrearCategoria] Categoría existente:`, existing);
+
     if (existing) {
+        const errorResponse = `Ya existe una categoría llamada "${nombre}". ¿Quieres usar otro nombre?`;
+        console.log(`⚠️ [handleCrearCategoria] Categoría ya existe. Respuesta:`, errorResponse);
         return {
-            response: `Ya existe una categoría llamada "${nombre}". ¿Quieres usar otro nombre?`
+            response: errorResponse
         };
     }
 
     // Seleccionar icono y color automáticamente
     const icon = selectIcon(nombre, type);
     const color = selectColor(type);
+    console.log(`🎨 [handleCrearCategoria] Icon: "${icon}", Color: "${color}"`);
 
     try {
+        console.log(`💾 [handleCrearCategoria] Intentando crear categoría en BD...`);
         // Crear la categoría
         const newCategory = await createCategory({
             name: nombre,
@@ -1600,16 +1615,19 @@ async function handleCrearCategoria(params) {
             color: color,
             icon: icon
         });
+        console.log(`✅ [handleCrearCategoria] Categoría creada exitosamente:`, newCategory);
 
         const tipoTexto = 'gastos';
         const response = `✅ ¡Listo! Creé la categoría "${nombre}" ${icon} para ${tipoTexto}. Ya puedes usarla en tus transacciones.`;
+        console.log(`💬 [handleCrearCategoria] Respuesta generada: "${response}"`);
 
         return {
             category: newCategory,
             response
         };
     } catch (error) {
-        console.error('Error creando categoría:', error);
+        console.error('❌ [handleCrearCategoria] Error creando categoría:', error);
+        console.error('❌ [handleCrearCategoria] Error stack:', error.stack);
 
         // Manejar error de nombre duplicado
         if (error.message.includes('duplicate') || error.message.includes('unique')) {
