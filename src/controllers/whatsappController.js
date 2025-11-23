@@ -440,8 +440,8 @@ async function processWhatsAppMessage(user_phone, message) {
 
                     // Enviar mensaje con botones interactivos
                     await sendInteractiveButtons(user_phone, response, [
-                        { id: 'ver_gastos_compartidos', title: 'Ver gastos compartidos' },
-                        { id: 'ver_categorias_compartidas', title: 'Ver por categorías' }
+                        { id: 'ver_gastos_compartidos', title: 'Ver gastos' },
+                        { id: 'ver_categorias_compartidas', title: 'Ver categorías' }
                     ]);
 
                     response = null; // Ya enviamos el mensaje con botones
