@@ -270,12 +270,48 @@ async function processWhatsAppMessage(user_phone, message) {
 
             case 'consultar_estado':
                 result = await handleConsultarEstado(normalizedPhone, intent.parameters);
-                response = await generateNaturalResponse({
-                    action: 'consultar_estado',
-                    result,
-                    userMessage: message,
-                    userPhone: normalizedPhone
-                });
+
+                // Construir mensaje con desglose de categorías
+                const periodoTexto = {
+                    'mes_actual': 'este mes',
+                    'mes_hasta_hoy': 'del mes hasta hoy',
+                    'mes_pasado': 'el mes pasado',
+                    'semana_actual': 'esta semana',
+                    'hoy': 'hoy',
+                    'personalizado': 'en el periodo consultado'
+                };
+
+                const periodoDescripcion = periodoTexto[result.periodo] || 'en el periodo consultado';
+                const hasData = result.totals.expense > 0;
+
+                if (!hasData) {
+                    response = `Aún no has registrado gastos ${periodoDescripcion}. ¡Empecemos! Puedes decirme algo como: 'gasté 500 en comida' 💰`;
+                } else {
+                    response = `💰 Estado financiero ${periodoDescripcion}:\n\n`;
+                    response += `📊 Total gastado: $${result.totals.expense}\n\n`;
+
+                    // Desglose por categorías (top 5)
+                    if (result.byCategory && result.byCategory.length > 0) {
+                        response += `📂 Por categorías:\n`;
+                        const topCategories = result.byCategory.slice(0, 5);
+                        topCategories.forEach((cat, index) => {
+                            const percentage = ((cat.amount / result.totals.expense) * 100).toFixed(1);
+                            response += `${index + 1}. ${cat.category}: $${cat.amount} (${percentage}%)\n`;
+                        });
+
+                        if (result.byCategory.length > 5) {
+                            response += `... y ${result.byCategory.length - 5} categorías más\n`;
+                        }
+                    }
+
+                    // Enviar mensaje con botones
+                    await sendInteractiveButtons(user_phone, response, [
+                        { id: 'ver_todas_transacciones', title: 'Ver transacciones' },
+                        { id: 'ver_por_categorias', title: 'Ver por categorías' }
+                    ]);
+
+                    response = null; // Ya enviamos el mensaje con botones
+                }
                 break;
 
             case 'listar_transacciones':
@@ -357,7 +393,61 @@ async function processWhatsAppMessage(user_phone, message) {
 
             case 'consultar_balance':
                 result = await handleConsultarBalance(normalizedPhone, intent.parameters);
-                response = result.response;
+
+                // Obtener transacciones compartidas para desglose por categoría
+                const periodo = intent.parameters?.periodo || 'mes_actual';
+                const sharedTxs = await getSharedTransactionsForBalance(normalizedPhone, periodo);
+
+                // Agrupar por categoría
+                const categoryMap = new Map();
+                sharedTxs.forEach(tx => {
+                    const catName = tx.category.name;
+                    if (!categoryMap.has(catName)) {
+                        categoryMap.set(catName, {
+                            category: catName,
+                            icon: tx.category.icon,
+                            total: 0,
+                            user_portion: 0,
+                            count: 0
+                        });
+                    }
+                    const cat = categoryMap.get(catName);
+                    cat.total += tx.total_amount;
+                    cat.user_portion += parseFloat(tx.user_amount);
+                    cat.count++;
+                });
+
+                // Convertir a array y ordenar por monto total
+                const categoryBreakdown = Array.from(categoryMap.values())
+                    .sort((a, b) => b.total - a.total);
+
+                // Construir respuesta mejorada con desglose de categorías
+                if (result.balance && categoryBreakdown.length > 0) {
+                    const totalGastos = categoryBreakdown.reduce((sum, cat) => sum + cat.total, 0);
+
+                    response = result.response + '\n\n📂 Por categorías:\n';
+
+                    const topCategories = categoryBreakdown.slice(0, 5);
+                    topCategories.forEach((cat, index) => {
+                        const percentage = ((cat.total / totalGastos) * 100).toFixed(1);
+                        const icon = cat.icon || '📁';
+                        response += `${index + 1}. ${icon} ${cat.category}: $${cat.total.toFixed(2)} (${percentage}%)\n`;
+                    });
+
+                    if (categoryBreakdown.length > 5) {
+                        response += `... y ${categoryBreakdown.length - 5} categorías más\n`;
+                    }
+
+                    // Enviar mensaje con botones interactivos
+                    await sendInteractiveButtons(user_phone, response, [
+                        { id: 'ver_gastos_compartidos', title: 'Ver gastos compartidos' },
+                        { id: 'ver_categorias_compartidas', title: 'Ver por categorías' }
+                    ]);
+
+                    response = null; // Ya enviamos el mensaje con botones
+                } else {
+                    response = result.response;
+                }
                 break;
 
             case 'listar_gastos_compartidos':
@@ -1168,6 +1258,117 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
                 } else {
                     console.log(`⚠️ Tipo de receipt no reconocido: ${replyId}`);
                     await sendWhatsAppMessage(user_phone, 'No entendí esa opción. Por favor intenta de nuevo.');
+                }
+                break;
+
+            case 'ver':
+                // Manejar botones del balance personal
+                if (replyId === 'ver_todas_transacciones') {
+                    // Listar todas las transacciones del mes
+                    const transactions = await getUserTransactions(normalizedPhone, { limit: 50 });
+
+                    if (transactions.length === 0) {
+                        await sendWhatsAppMessage(user_phone, 'No tienes transacciones registradas.');
+                        return;
+                    }
+
+                    let response = `📋 *Tus transacciones:*\n\n`;
+                    transactions.forEach((tx, index) => {
+                        const date = new Date(tx.transaction_date);
+                        const formattedDate = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+                        response += `${index + 1}. $${tx.amount} - ${tx.description}\n   📁 ${tx.category_name} | 📅 ${formattedDate}\n\n`;
+                    });
+
+                    await sendWhatsAppMessage(user_phone, response);
+                } else if (replyId === 'ver_por_categorias') {
+                    // Mostrar desglose completo por categorías
+                    const summary = await getFinancialSummary(normalizedPhone, {
+                        startDate: toMexicoDateString(new Date(new Date().getFullYear(), new Date().getMonth(), 1)),
+                        endDate: toMexicoDateString(new Date())
+                    });
+
+                    if (summary.byCategory.length === 0) {
+                        await sendWhatsAppMessage(user_phone, 'No tienes gastos por categorías este mes.');
+                        return;
+                    }
+
+                    let response = `📊 *Gastos por categorías este mes:*\n\n`;
+                    summary.byCategory.forEach((cat, index) => {
+                        const percentage = ((cat.amount / summary.totals.expense) * 100).toFixed(1);
+                        response += `${index + 1}. ${cat.category}: $${cat.amount} (${percentage}%)\n`;
+                    });
+                    response += `\n💰 *Total: $${summary.totals.expense}*`;
+
+                    await sendWhatsAppMessage(user_phone, response);
+                } else if (replyId === 'ver_gastos_compartidos') {
+                    // Listar gastos compartidos
+                    const sharedExpenses = await getSharedTransactions(normalizedPhone, 'mes_actual');
+
+                    if (sharedExpenses.length === 0) {
+                        await sendWhatsAppMessage(user_phone, 'No tienes gastos compartidos este mes.');
+                        return;
+                    }
+
+                    let response = `📋 *Gastos compartidos este mes:*\n\n`;
+                    sharedExpenses.forEach((expense, index) => {
+                        const paidByUser = expense.payer_phone === normalizedPhone;
+                        const paidByText = paidByUser ? '(tú pagaste)' : '(pagó tu pareja)';
+                        const date = new Date(expense.transaction_date);
+                        const formattedDate = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+                        response += `${index + 1}. $${expense.total_amount} - ${expense.description || expense.category_name} ${paidByText}\n`;
+                        response += `   Tu parte: $${expense.user_amount} (${expense.user_percentage}%)\n`;
+                        response += `   📅 ${formattedDate}\n\n`;
+                    });
+
+                    await sendWhatsAppMessage(user_phone, response);
+                } else if (replyId === 'ver_categorias_compartidas') {
+                    // Mostrar desglose completo por categorías de gastos compartidos
+                    const sharedTxs = await getSharedTransactionsForBalance(normalizedPhone, 'mes_actual');
+
+                    if (sharedTxs.length === 0) {
+                        await sendWhatsAppMessage(user_phone, 'No tienes gastos compartidos este mes.');
+                        return;
+                    }
+
+                    // Agrupar por categoría
+                    const categoryMap = new Map();
+                    let totalShared = 0;
+
+                    sharedTxs.forEach(tx => {
+                        const catName = tx.category.name;
+                        if (!categoryMap.has(catName)) {
+                            categoryMap.set(catName, {
+                                category: catName,
+                                icon: tx.category.icon,
+                                total: 0,
+                                user_portion: 0,
+                                count: 0
+                            });
+                        }
+                        const cat = categoryMap.get(catName);
+                        cat.total += tx.total_amount;
+                        cat.user_portion += parseFloat(tx.user_amount);
+                        cat.count++;
+                        totalShared += tx.total_amount;
+                    });
+
+                    // Convertir a array y ordenar por monto total
+                    const categoryBreakdown = Array.from(categoryMap.values())
+                        .sort((a, b) => b.total - a.total);
+
+                    let response = `📊 *Gastos compartidos por categorías:*\n\n`;
+                    categoryBreakdown.forEach((cat, index) => {
+                        const percentage = ((cat.total / totalShared) * 100).toFixed(1);
+                        const icon = cat.icon || '📁';
+                        response += `${index + 1}. ${icon} ${cat.category}:\n`;
+                        response += `   Total: $${cat.total.toFixed(2)} (${percentage}%)\n`;
+                        response += `   Tu parte: $${cat.user_portion.toFixed(2)}\n`;
+                        response += `   ${cat.count} gasto${cat.count > 1 ? 's' : ''}\n\n`;
+                    });
+                    response += `💰 *Total compartido: $${totalShared.toFixed(2)}*`;
+
+                    await sendWhatsAppMessage(user_phone, response);
                 }
                 break;
 
