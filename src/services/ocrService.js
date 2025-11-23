@@ -34,17 +34,26 @@ export async function extractReceiptData(imageBase64, mimeType = 'image/jpeg') {
   "confidence": <0-100, qué tan seguro estás de los datos extraídos>
 }
 
-IMPORTANTE:
+IMPORTANTE - MONTO A EXTRAER:
+- SIEMPRE usa el campo "TOTAL" del ticket (es el monto final a pagar)
+- Si el ticket tiene PROPINA o PROP., el TOTAL ya incluye la propina
+- NO uses el campo "MONTO" o "SUBTOTAL" - estos NO incluyen la propina
+- En tickets de tarjeta (Citibanamex, etc.), busca la línea que dice "TOTAL $" y usa ese valor
+- Si solo hay un monto visible, usa ese
 - Si no puedes leer el monto claramente, pon null
+- El monto debe ser solo el número, sin símbolo de moneda
+
+CATEGORÍAS:
 - La categoría debe ser UNA de las listadas arriba (elige la más apropiada)
 - Si es una gasolinera (Pemex, Shell, BP, Mobil, etc.), usa "Transporte"
 - Si es un restaurante o supermercado (Oxxo, 7-Eleven, Soriana, Walmart, etc.), usa "Comida"
 - Si es farmacia (Guadalajara, del Ahorro, Benavides) o doctor, usa "Salud"
 - Si es tienda de ropa (Zara, H&M, Coppel), usa "Ropa"
 - Si es luz, agua, gas, internet, celular, usa "Servicios"
+
+OTROS CAMPOS:
 - description debe ser descriptivo, ej: "Compra en Soriana" o "Gasolina en Pemex"
 - confidence debe reflejar qué tan claro puedes leer el ticket (borroso = baja, nítido = alta)
-- El monto debe ser solo el número, sin símbolo de moneda
 
 Responde SOLO con el JSON, sin texto adicional.`
                         },

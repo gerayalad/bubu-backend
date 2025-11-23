@@ -28,12 +28,22 @@ export function getDatabase() {
 
         pool = new Pool(config);
 
+        // Configurar timezone de México para todas las conexiones
+        // Esto hace que CURRENT_TIMESTAMP y NOW() usen America/Mexico_City
+        pool.on('connect', async (client) => {
+            try {
+                await client.query("SET timezone = 'America/Mexico_City'");
+            } catch (err) {
+                console.error('Error configurando timezone:', err);
+            }
+        });
+
         // Manejar errores del pool
         pool.on('error', (err) => {
             console.error('Error inesperado en el pool de PostgreSQL:', err);
         });
 
-        console.log('✅ Pool de PostgreSQL creado');
+        console.log('✅ Pool de PostgreSQL creado con timezone America/Mexico_City');
     }
 
     return pool;

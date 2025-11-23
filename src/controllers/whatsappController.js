@@ -170,7 +170,7 @@ async function processWhatsAppMessage(user_phone, message) {
                 saveLastTransaction(normalizedPhone, transaction);
                 clearPendingTransaction(normalizedPhone);
 
-                const tipoText = pendingTx.type === 'expense' ? 'gasto' : 'ingreso';
+                const tipoText = 'gasto';
                 const emoji = pendingTx.type === 'expense' ? '💳' : '💰';
                 const response = `✅ ¡Listo! Registré tu ${tipoText} de $${transaction.amount}\n\n${emoji} ${transaction.description}\n📁 ${pendingTx.categoria}`;
 
@@ -398,7 +398,7 @@ async function processWhatsAppMessage(user_phone, message) {
  */
 async function handleConfirmarTransaccion(normalizedPhone, user_phone, params) {
     const { tipo, monto, descripcion, categoria, fecha } = params;
-    const type = tipo === 'gasto' ? 'expense' : 'income';
+    const type = 'expense';
 
     let category = await getCategoryByName(categoria);
     if (!category) {
@@ -522,6 +522,12 @@ async function handleConsultarEstado(user_phone, params) {
             endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             break;
 
+        case 'mes_hasta_hoy':
+            // Desde el inicio del mes hasta hoy
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(now); // Hoy
+            break;
+
         case 'mes_pasado':
             startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             endDate = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -562,7 +568,7 @@ async function handleConsultarEstado(user_phone, params) {
     }
 
     if (filtro_tipo) {
-        const type = filtro_tipo === 'gasto' ? 'expense' : 'income';
+        const type = 'expense';
         summary.byCategory = summary.byCategory.filter(c => c.type === type);
     }
 
@@ -577,7 +583,7 @@ async function handleListarTransacciones(user_phone, params) {
     };
 
     if (tipo !== 'todos') {
-        filters.type = tipo === 'gasto' ? 'expense' : 'income';
+        filters.type = 'expense';
     }
 
     if (categoria) {
@@ -595,6 +601,12 @@ async function handleListarTransacciones(user_phone, params) {
             case 'mes_actual':
                 startDate = new Date(now.getFullYear(), now.getMonth(), 1);
                 endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                break;
+
+            case 'mes_hasta_hoy':
+                // Desde el inicio del mes hasta hoy
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now); // Hoy
                 break;
 
             case 'mes_pasado':
@@ -647,23 +659,57 @@ async function handleEliminarTransaccion(user_phone, params) {
 }
 
 async function handleEditarTransaccion(user_phone, params) {
-    const { numero, nuevo_monto } = params;
+    const { numero, nuevo_monto, nueva_categoria, nueva_descripcion, nueva_fecha } = params;
+
+    // Obtener transacción del contexto
     const transaction = getTransactionByNumber(user_phone, numero);
 
     if (!transaction) {
         throw new Error(`No encontré la transacción #${numero}. ¿Podrías pedirme que liste las transacciones primero?`);
     }
 
-    const oldAmount = transaction.amount;
-    const updated = await updateTransaction(transaction.id, user_phone, {
-        amount: nuevo_monto
-    });
+    // Preparar datos de actualización
+    const updateData = {};
+    const changes = [];
+
+    if (nuevo_monto !== undefined) {
+        updateData.amount = nuevo_monto;
+        changes.push({ field: 'monto', old: transaction.amount, new: nuevo_monto });
+    }
+
+    if (nueva_categoria) {
+        const category = await getCategoryByName(nueva_categoria);
+        if (!category) {
+            throw new Error(`No encontré la categoría "${nueva_categoria}"`);
+        }
+        updateData.category_id = category.id;
+        changes.push({ field: 'categoria', old: transaction.category_name, new: nueva_categoria });
+    }
+
+    if (nueva_descripcion !== undefined) {
+        updateData.description = nueva_descripcion;
+        changes.push({ field: 'descripcion', old: transaction.description, new: nueva_descripcion });
+    }
+
+    if (nueva_fecha) {
+        updateData.transaction_date = nueva_fecha;
+        changes.push({ field: 'fecha', old: transaction.transaction_date, new: nueva_fecha });
+    }
+
+    if (changes.length === 0) {
+        throw new Error('No especificaste ningún cambio. ¿Qué quieres modificar?');
+    }
+
+    // Actualizar transacción
+    const updated = await updateTransaction(transaction.id, user_phone, updateData);
 
     return {
         transaction: updated,
         numero: numero,
-        oldAmount: oldAmount,
-        newAmount: nuevo_monto
+        changes: changes,
+        // Mantener compatibilidad con código antiguo
+        oldAmount: transaction.amount,
+        newAmount: nuevo_monto || transaction.amount
     };
 }
 
@@ -674,41 +720,51 @@ async function handleConsultarCategorias(params) {
     const { tipo_categoria = 'todas' } = params;
     const categories = await getAllCategories();
 
+    // Las primeras 9 categorías son predefinidas (solo gastos)
+    const predefinedCategoryNames = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
+    ];
+
     let filteredCategories;
     let tipoTexto;
 
-    if (tipo_categoria === 'gasto') {
+    if (tipo_categoria === 'personalizadas') {
+        // Solo categorías personalizadas (las que no están en la lista predefinida)
+        filteredCategories = categories.filter(c => !predefinedCategoryNames.includes(c.name));
+        tipoTexto = 'personalizadas';
+    } else if (tipo_categoria === 'gasto') {
         filteredCategories = categories.filter(c => c.type === 'expense');
         tipoTexto = 'gastos';
-    } else if (tipo_categoria === 'ingreso') {
-        filteredCategories = categories.filter(c => c.type === 'income');
-        tipoTexto = 'ingresos';
     } else {
+        // Mostrar todas (solo hay gastos)
         filteredCategories = categories;
         tipoTexto = 'disponibles';
     }
 
-    const expenseCategories = filteredCategories
-        .filter(c => c.type === 'expense')
-        .map(c => `${c.icon} ${c.name}`)
-        .join(', ');
+    // Si solo son personalizadas y no hay ninguna
+    if (tipo_categoria === 'personalizadas' && filteredCategories.length === 0) {
+        return {
+            categories: [],
+            response: 'Aún no has creado categorías personalizadas. Puedes crear una diciendo: "crea una categoría de gastos llamada Mascotas" 🐶'
+        };
+    }
 
-    const incomeCategories = filteredCategories
-        .filter(c => c.type === 'income')
+    const expenseCategories = filteredCategories
         .map(c => `${c.icon} ${c.name}`)
         .join(', ');
 
     let response = `Estas son las categorías ${tipoTexto}:\n\n`;
 
-    if (tipo_categoria === 'todas' || tipo_categoria === 'gasto') {
+    if (expenseCategories) {
         response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
     }
 
-    if (tipo_categoria === 'todas' || tipo_categoria === 'ingreso') {
-        response += `💰 *INGRESOS:*\n${incomeCategories}\n\n`;
+    if (tipo_categoria === 'personalizadas') {
+        response += `Tienes ${filteredCategories.length} categoría${filteredCategories.length > 1 ? 's' : ''} personalizada${filteredCategories.length > 1 ? 's' : ''}. Puedes crear más diciendo: "crea categoría Gimnasio" 💪`;
+    } else {
+        response += 'Puedes usarlas para registrar tus transacciones. Ejemplo: "gasté 500 en comida" 💳';
     }
-
-    response += 'Puedes usarlas para registrar tus transacciones. Ejemplo: "gasté 500 en comida" 💳';
 
     return {
         categories: filteredCategories,
@@ -731,9 +787,10 @@ function handleAyudaUso(params) {
 • "Pagué 1200 de luz"
 • "Ayer compré ropa por 800"
 
-💰 *INGRESOS:*
-• "Me pagaron 15000 de nómina"
-• "Vendí algo por 3500"
+📸 *CON FOTO DE TICKET:*
+• Envía una foto del ticket
+• Detecto automáticamente el monto total (incluyendo propina)
+• Identifico el comercio y sugiero la categoría
 
 Puedo detectar la categoría automáticamente. ¿Qué quieres registrar?`;
 
@@ -743,12 +800,15 @@ Puedo detectar la categoría automáticamente. ¿Qué quieres registrar?`;
 📈 *CONSULTAS:*
 • "¿Cómo voy este mes?"
 • "¿Cuánto he gastado?"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
 • "Gastos del mes pasado"
 • "¿Qué gastos tengo en comida?"
 
 También puedes ver listas detalladas:
 • "Muestra mis gastos en comida"
 • "Ver mis servicios"
+• "Lista de gastos de hoy"
 
 ¿Qué quieres consultar?`;
 
@@ -757,19 +817,32 @@ También puedes ver listas detalladas:
 
 Puedo ayudarte a:
 
-📊 *REGISTRAR:* Gastos e ingresos
+📊 *REGISTRAR:* Gastos
 • "Gasté 500 en tacos"
-• "Me llegó la nómina de 15000"
+• "Pagué 1200 de luz"
+• 📸 Envía foto del ticket (captura el total con propina)
 
 📈 *CONSULTAR:* Tu estado financiero
 • "¿Cómo voy este mes?"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
 • "Muestra mis gastos en comida"
 
 ✏️ *GESTIONAR:* Editar o eliminar
 • "Elimina el 1"
 • "Cambia el 2 a $600"
+• "Cambia la categoría del 1 a Comida"
+• "Cambia la descripción del 2 a Netflix"
 
-💡 Di "qué categorías existen" para ver todas las opciones.
+🏷️ *CATEGORÍAS PERSONALIZADAS:*
+• "Crea categoría Mascotas"
+• "Ver categorías personalizadas"
+• "Qué categorías existen"
+
+💑 *GASTOS COMPARTIDOS:*
+• "Registra a mi pareja con teléfono 5512345678"
+• "Gasté 200 en comida, pagué yo"
+• "¿Cómo va el balance?"
 
 ¿En qué te ayudo?`;
     }
@@ -780,7 +853,7 @@ function handleConversacionGeneral(params) {
 
     switch (tipo_mensaje) {
         case 'saludo':
-            return '¡Hola! Soy BUBU, tu asistente de finanzas personales. Puedo ayudarte a registrar tus gastos e ingresos, y consultar tu estado financiero. ¿Qué necesitas?';
+            return '¡Hola! Soy BUBU, tu asistente de finanzas personales. Puedo ayudarte a registrar tus gastos y consultar tu estado financiero. ¿Qué necesitas?';
 
         case 'despedida':
             return '¡Hasta luego! Recuerda mantener tus finanzas al día.';
@@ -789,7 +862,27 @@ function handleConversacionGeneral(params) {
             return '¡De nada! Estoy aquí para ayudarte con tus finanzas.';
 
         default:
-            return '¿En qué puedo ayudarte hoy?';
+            // Respuesta mejorada para preguntas generales
+            return `¡Claro! Puedo ayudarte con:
+
+📊 *Registrar* gastos (texto o foto de ticket)
+💰 *Consultar* tu estado (hoy, del mes, hasta hoy)
+📋 *Ver* listas de transacciones
+✏️ *Editar* categoría, monto, descripción o fecha
+🗑️ *Eliminar* transacciones
+🏷️ *Crear categorías personalizadas*
+💑 *Gastos compartidos* con tu pareja
+
+Ejemplos:
+• "Gasté 500 en tacos"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
+• "Cambia la categoría del 1 a Comida"
+• "Crea categoría Mascotas"
+
+Di "ayuda" para más información.
+
+¿Qué quieres hacer?`;
     }
 }
 
@@ -910,7 +1003,7 @@ async function processInteractiveReply(user_phone, replyId, replyTitle) {
                     saveLastTransaction(normalizedPhone, transaction);
                     clearPendingTransaction(normalizedPhone);
 
-                    const tipoText = pendingTx.type === 'expense' ? 'gasto' : 'ingreso';
+                    const tipoText = 'gasto';
                     const emoji = pendingTx.type === 'expense' ? '💳' : '💰';
                     await sendWhatsAppMessage(
                         user_phone,

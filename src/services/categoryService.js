@@ -112,8 +112,7 @@ export async function updateCategory(id, data) {
     // Validar que no sea una categoría predefinida por nombre
     const predefinedCategories = [
         'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
-        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
-        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
     ];
 
     if (predefinedCategories.includes(category.name)) {
@@ -161,7 +160,7 @@ export async function updateCategory(id, data) {
 
 /**
  * Elimina una categoría personalizada
- * Las transacciones asociadas se mueven a "Otros Gastos" u "Otros Ingresos"
+ * Las transacciones asociadas se mueven a "Otros Gastos"
  * @param {number} id - ID de la categoría a eliminar
  * @returns {object} Resultado de la eliminación
  */
@@ -175,8 +174,7 @@ export async function deleteCategory(id) {
     // Validar que no sea una categoría predefinida
     const predefinedCategories = [
         'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
-        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
-        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
     ];
 
     if (predefinedCategories.includes(category.name)) {
@@ -184,7 +182,7 @@ export async function deleteCategory(id) {
     }
 
     // Determinar categoría de reemplazo según el tipo
-    const fallbackName = category.type === 'expense' ? 'Otros Gastos' : 'Otros Ingresos';
+    const fallbackName = 'Otros Gastos';
     const fallbackCategory = await getCategoryByName(fallbackName);
 
     if (!fallbackCategory) {

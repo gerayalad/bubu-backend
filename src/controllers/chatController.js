@@ -76,8 +76,8 @@ export async function processMessage(req, res) {
                 // Limpiar transacción pendiente
                 clearPendingTransaction(user_phone);
 
-                const emoji = transaction.type === 'expense' ? '💳' : '💰';
-                const tipoText = transaction.type === 'expense' ? 'gasto' : 'ingreso';
+                const emoji = '💳';
+                const tipoText = 'gasto';
                 const response = `✅ ¡Listo! Registré tu ${tipoText} de $${transaction.amount} en ${pendingTx.categoria} ${emoji}`;
 
                 await saveChatMessage({
@@ -354,8 +354,8 @@ async function handleRegistrarTransaccion(user_phone, params) {
         es_compartido, quien_pago, split_custom_user, split_custom_partner
     } = params;
 
-    // Convertir tipo a formato de BD
-    const type = tipo === 'gasto' ? 'expense' : 'income';
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
 
     // Buscar categoría
     let category = await getCategoryByName(categoria);
@@ -533,6 +533,12 @@ async function handleConsultarEstado(user_phone, params) {
             endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
             break;
 
+        case 'mes_hasta_hoy':
+            // Desde el inicio del mes hasta hoy
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(now); // Hoy
+            break;
+
         case 'mes_pasado':
             startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
             endDate = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -576,7 +582,7 @@ async function handleConsultarEstado(user_phone, params) {
     }
 
     if (filtro_tipo) {
-        const type = filtro_tipo === 'gasto' ? 'expense' : 'income';
+        const type = 'expense';
         summary.byCategory = summary.byCategory.filter(c => c.type === type);
     }
 
@@ -594,7 +600,7 @@ async function handleListarTransacciones(user_phone, params) {
     };
 
     if (tipo !== 'todos') {
-        filters.type = tipo === 'gasto' ? 'expense' : 'income';
+        filters.type = 'expense';
     }
 
     // Filtrar por categoría si se especifica
@@ -614,6 +620,12 @@ async function handleListarTransacciones(user_phone, params) {
             case 'mes_actual':
                 startDate = new Date(now.getFullYear(), now.getMonth(), 1);
                 endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+                break;
+
+            case 'mes_hasta_hoy':
+                // Desde el inicio del mes hasta hoy
+                startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                endDate = new Date(now); // Hoy
                 break;
 
             case 'mes_pasado':
@@ -672,10 +684,10 @@ async function handleEliminarTransaccion(user_phone, params) {
 }
 
 /**
- * Maneja edición del monto de una transacción
+ * Maneja edición de una transacción (monto, categoría, descripción o fecha)
  */
 async function handleEditarTransaccion(user_phone, params) {
-    const { numero, nuevo_monto } = params;
+    const { numero, nuevo_monto, nueva_categoria, nueva_descripcion, nueva_fecha } = params;
 
     // Obtener transacción del contexto
     const transaction = getTransactionByNumber(user_phone, numero);
@@ -684,18 +696,48 @@ async function handleEditarTransaccion(user_phone, params) {
         throw new Error(`No encontré la transacción #${numero}. ¿Podrías pedirme que liste las transacciones primero?`);
     }
 
-    const oldAmount = transaction.amount;
+    // Preparar datos de actualización
+    const updateData = {};
+    const changes = [];
+
+    if (nuevo_monto !== undefined) {
+        updateData.amount = nuevo_monto;
+        changes.push({ field: 'monto', old: transaction.amount, new: nuevo_monto });
+    }
+
+    if (nueva_categoria) {
+        const category = await getCategoryByName(nueva_categoria);
+        if (!category) {
+            throw new Error(`No encontré la categoría "${nueva_categoria}"`);
+        }
+        updateData.category_id = category.id;
+        changes.push({ field: 'categoria', old: transaction.category_name, new: nueva_categoria });
+    }
+
+    if (nueva_descripcion !== undefined) {
+        updateData.description = nueva_descripcion;
+        changes.push({ field: 'descripcion', old: transaction.description, new: nueva_descripcion });
+    }
+
+    if (nueva_fecha) {
+        updateData.transaction_date = nueva_fecha;
+        changes.push({ field: 'fecha', old: transaction.transaction_date, new: nueva_fecha });
+    }
+
+    if (changes.length === 0) {
+        throw new Error('No especificaste ningún cambio. ¿Qué quieres modificar?');
+    }
 
     // Actualizar transacción
-    const updated = await updateTransaction(transaction.id, user_phone, {
-        amount: nuevo_monto
-    });
+    const updated = await updateTransaction(transaction.id, user_phone, updateData);
 
     return {
         transaction: updated,
         numero: numero,
-        oldAmount: oldAmount,
-        newAmount: nuevo_monto
+        changes: changes,
+        // Mantener compatibilidad con código antiguo
+        oldAmount: transaction.amount,
+        newAmount: nuevo_monto || transaction.amount
     };
 }
 
@@ -706,11 +748,10 @@ async function handleConsultarCategorias(params) {
     const { tipo_categoria = 'todas' } = params;
     const categories = await getAllCategories();
 
-    // Las primeras 13 categorías son predefinidas (9 gastos + 4 ingresos)
+    // Las primeras 9 categorías son predefinidas (solo gastos)
     const predefinedCategoryNames = [
         'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
-        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
-        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
     ];
 
     let filteredCategories;
@@ -723,10 +764,8 @@ async function handleConsultarCategorias(params) {
     } else if (tipo_categoria === 'gasto') {
         filteredCategories = categories.filter(c => c.type === 'expense');
         tipoTexto = 'gastos';
-    } else if (tipo_categoria === 'ingreso') {
-        filteredCategories = categories.filter(c => c.type === 'income');
-        tipoTexto = 'ingresos';
     } else {
+        // Mostrar todas (solo hay gastos)
         filteredCategories = categories;
         tipoTexto = 'disponibles';
     }
@@ -740,27 +779,13 @@ async function handleConsultarCategorias(params) {
     }
 
     const expenseCategories = filteredCategories
-        .filter(c => c.type === 'expense')
-        .map(c => `${c.icon} ${c.name}`)
-        .join(', ');
-
-    const incomeCategories = filteredCategories
-        .filter(c => c.type === 'income')
         .map(c => `${c.icon} ${c.name}`)
         .join(', ');
 
     let response = `Estas son las categorías ${tipoTexto}:\n\n`;
 
-    if (tipo_categoria === 'todas' || tipo_categoria === 'gasto' || tipo_categoria === 'personalizadas') {
-        if (expenseCategories) {
-            response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
-        }
-    }
-
-    if (tipo_categoria === 'todas' || tipo_categoria === 'ingreso' || tipo_categoria === 'personalizadas') {
-        if (incomeCategories) {
-            response += `💰 *INGRESOS:*\n${incomeCategories}\n\n`;
-        }
+    if (expenseCategories) {
+        response += `📊 *GASTOS:*\n${expenseCategories}\n\n`;
     }
 
     if (tipo_categoria === 'personalizadas') {
@@ -781,8 +806,8 @@ async function handleConsultarCategorias(params) {
 async function handleCrearCategoria(params) {
     const { nombre, tipo } = params;
 
-    // Convertir tipo a formato de BD
-    const type = tipo === 'gasto' ? 'expense' : 'income';
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
 
     // Verificar si la categoría ya existe
     const existing = await getCategoryByName(nombre);
@@ -805,7 +830,7 @@ async function handleCrearCategoria(params) {
             icon: icon
         });
 
-        const tipoTexto = tipo === 'gasto' ? 'gastos' : 'ingresos';
+        const tipoTexto = 'gastos';
         const response = `✅ ¡Listo! Creé la categoría "${nombre}" ${icon} para ${tipoTexto}. Ya puedes usarla en tus transacciones.`;
 
         return {
@@ -845,8 +870,7 @@ async function handleEditarCategoria(params) {
     // Validar que sea una categoría personalizada
     const predefinedCategories = [
         'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
-        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
-        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
     ];
 
     if (predefinedCategories.includes(category.name)) {
@@ -910,8 +934,7 @@ async function handleEliminarCategoria(params) {
     // Validar que sea una categoría personalizada
     const predefinedCategories = [
         'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
-        'Educación', 'Ropa', 'Hogar', 'Otros Gastos',
-        'Nómina', 'Ventas', 'Inversiones', 'Otros Ingresos'
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
     ];
 
     if (predefinedCategories.includes(category.name)) {
@@ -949,8 +972,8 @@ async function handleEliminarCategoria(params) {
 async function handleMoverTransacciones(user_phone, params) {
     const { categoria_origen, categoria_destino, tipo } = params;
 
-    // Convertir tipo a formato de BD
-    const type = tipo === 'gasto' ? 'expense' : 'income';
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
 
     try {
         // Buscar categoría origen
@@ -961,11 +984,10 @@ async function handleMoverTransacciones(user_phone, params) {
             };
         }
 
-        // Verificar que el tipo coincida
-        if (fromCategory.type !== type) {
-            const expectedType = fromCategory.type === 'expense' ? 'gastos' : 'ingresos';
+        // Verificar que sea una categoría de gastos
+        if (fromCategory.type !== 'expense') {
             return {
-                response: `La categoría "${categoria_origen}" es de ${expectedType}, no de ${tipo === 'gasto' ? 'gastos' : 'ingresos'}.`
+                response: `La categoría "${categoria_origen}" no es una categoría de gastos válida.`
             };
         }
 
@@ -986,11 +1008,10 @@ async function handleMoverTransacciones(user_phone, params) {
 
             console.log(`✨ Categoría "${categoria_destino}" creada automáticamente`);
         } else {
-            // Verificar que el tipo coincida
-            if (toCategory.type !== type) {
-                const expectedType = toCategory.type === 'expense' ? 'gastos' : 'ingresos';
+            // Verificar que sea una categoría de gastos
+            if (toCategory.type !== 'expense') {
                 return {
-                    response: `La categoría destino "${categoria_destino}" es de ${expectedType}, no de ${tipo === 'gasto' ? 'gastos' : 'ingresos'}. No puedo mover transacciones entre tipos diferentes.`
+                    response: `La categoría destino "${categoria_destino}" no es una categoría de gastos válida.`
                 };
             }
         }
@@ -1046,9 +1067,10 @@ function handleAyudaUso(params) {
 • "Pagué 1200 de luz"
 • "Ayer compré ropa por 800"
 
-💰 *INGRESOS:*
-• "Me pagaron 15000 de nómina"
-• "Vendí algo por 3500"
+📸 *CON FOTO DE TICKET:*
+• Envía una foto del ticket
+• Detecto automáticamente el monto total (incluyendo propina)
+• Identifico el comercio y sugiero la categoría
 
 Puedo detectar la categoría automáticamente. ¿Qué quieres registrar?`;
 
@@ -1058,12 +1080,15 @@ Puedo detectar la categoría automáticamente. ¿Qué quieres registrar?`;
 📈 *CONSULTAS:*
 • "¿Cómo voy este mes?"
 • "¿Cuánto he gastado?"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
 • "Gastos del mes pasado"
 • "¿Qué gastos tengo en comida?"
 
 También puedes ver listas detalladas:
 • "Muestra mis gastos en comida"
 • "Ver mis servicios"
+• "Lista de gastos de hoy"
 
 ¿Qué quieres consultar?`;
 
@@ -1072,25 +1097,32 @@ También puedes ver listas detalladas:
 
 Puedo ayudarte a:
 
-📊 *REGISTRAR:* Gastos e ingresos
+📊 *REGISTRAR:* Gastos
 • "Gasté 500 en tacos"
-• "Me llegó la nómina de 15000"
+• "Pagué 1200 de luz"
+• 📸 Envía foto del ticket (captura el total con propina)
 
 📈 *CONSULTAR:* Tu estado financiero
 • "¿Cómo voy este mes?"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
 • "Muestra mis gastos en comida"
 
 ✏️ *GESTIONAR:* Editar o eliminar
 • "Elimina el 1"
 • "Cambia el 2 a $600"
+• "Cambia la categoría del 1 a Comida"
+• "Cambia la descripción del 2 a Netflix"
 
-🏷️ *CREAR CATEGORÍAS PERSONALIZADAS:*
-¡Sí! Puedes crear tus propias categorías. Solo dime:
-• "Crea una categoría de gastos llamada Mascotas"
-• "Crea categoría Freelance de ingresos"
-Yo elegiré automáticamente el icono más apropiado.
+🏷️ *CATEGORÍAS PERSONALIZADAS:*
+• "Crea categoría Mascotas"
+• "Ver categorías personalizadas"
+• "Qué categorías existen"
 
-💡 Di "qué categorías existen" para ver todas las opciones.
+💑 *GASTOS COMPARTIDOS:*
+• "Registra a mi pareja con teléfono 5512345678"
+• "Gasté 200 en comida, pagué yo"
+• "¿Cómo va el balance?"
 
 ¿En qué te ayudo?`;
     }
@@ -1104,7 +1136,7 @@ function handleConversacionGeneral(params) {
 
     switch (tipo_mensaje) {
         case 'saludo':
-            return '¡Hola! Soy BUBU, tu asistente de finanzas personales. Puedo ayudarte a registrar tus gastos e ingresos, y consultar tu estado financiero. ¿Qué necesitas?';
+            return '¡Hola! Soy BUBU, tu asistente de finanzas personales. Puedo ayudarte a registrar tus gastos y consultar tu estado financiero. ¿Qué necesitas?';
 
         case 'despedida':
             return '¡Hasta luego! Recuerda mantener tus finanzas al día.';
@@ -1116,17 +1148,22 @@ function handleConversacionGeneral(params) {
             // Respuesta mejorada para preguntas generales
             return `¡Claro! Puedo ayudarte con:
 
-📊 *Registrar* gastos e ingresos
-💰 *Consultar* tu estado financiero
+📊 *Registrar* gastos (texto o foto de ticket)
+💰 *Consultar* tu estado (hoy, del mes, hasta hoy)
 📋 *Ver* listas de transacciones
-✏️ *Editar* o *eliminar* transacciones
+✏️ *Editar* categoría, monto, descripción o fecha
+🗑️ *Eliminar* transacciones
 🏷️ *Crear categorías personalizadas*
+💑 *Gastos compartidos* con tu pareja
 
 Ejemplos:
 • "Gasté 500 en tacos"
-• "¿Cómo voy este mes?"
-• "Crea categoría Mascotas de gastos"
-• "¿Qué categorías personalizadas tengo?"
+• "Gastos de hoy"
+• "Ver todos los gastos hasta hoy"
+• "Cambia la categoría del 1 a Comida"
+• "Crea categoría Mascotas"
+
+Di "ayuda" para más información.
 
 ¿Qué quieres hacer?`;
     }
@@ -1530,8 +1567,8 @@ export async function processImageMessage(req, res) {
 async function handleConfirmarTransaccion(user_phone, params) {
     const { tipo, monto, descripcion, categoria, fecha } = params;
 
-    // Convertir tipo a formato de BD
-    const type = tipo === 'gasto' ? 'expense' : 'income';
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
 
     // Buscar categoría
     let category = await getCategoryByName(categoria);
@@ -1570,7 +1607,7 @@ async function handleConfirmarTransaccion(user_phone, params) {
 
     // Preparar emoji según tipo
     const emoji = type === 'expense' ? '💳' : '💰';
-    const tipoText = type === 'expense' ? 'Gasto' : 'Ingreso';
+    const tipoText = 'Gasto';
 
     // Generar respuesta de confirmación con botones interactivos
     const body = `📝 ¿Confirmas esta transacción?

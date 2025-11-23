@@ -73,8 +73,8 @@ async function getOpenAIFunctions() {
                 properties: {
                     periodo: {
                         type: 'string',
-                        enum: ['mes_actual', 'mes_pasado', 'semana_actual', 'hoy', 'personalizado'],
-                        description: 'Periodo de consulta. "mes_actual" para el mes en curso, "mes_pasado" para el mes anterior, etc.'
+                        enum: ['mes_actual', 'mes_hasta_hoy', 'mes_pasado', 'semana_actual', 'hoy', 'personalizado'],
+                        description: 'Periodo de consulta. "mes_actual" para el mes en curso completo, "mes_hasta_hoy" para gastos desde inicio del mes hasta hoy, "mes_pasado" para el mes anterior, etc.'
                     },
                     fecha_inicio: {
                         type: 'string',
@@ -116,8 +116,8 @@ async function getOpenAIFunctions() {
                     },
                     periodo: {
                         type: 'string',
-                        enum: ['mes_actual', 'mes_pasado', 'semana_actual', 'hoy', 'personalizado', 'todos'],
-                        description: 'Periodo temporal para filtrar. "todos" muestra todas las transacciones sin filtro de fecha.'
+                        enum: ['mes_actual', 'mes_hasta_hoy', 'mes_pasado', 'semana_actual', 'hoy', 'personalizado', 'todos'],
+                        description: 'Periodo temporal para filtrar. "mes_hasta_hoy" muestra gastos desde el inicio del mes hasta hoy. "mes_actual" muestra todo el mes. "todos" muestra todas las transacciones sin filtro de fecha.'
                     },
                     fecha_inicio: {
                         type: 'string',
@@ -151,7 +151,7 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'editar_transaccion',
-            description: 'Edita el monto de una transacción. Usa esta cuando diga "cambia el 1 a 500", "edita el 2 a $600", "modifica la transacción 3 a 1000", etc.',
+            description: 'Edita una transacción (monto, categoría, descripción o fecha). Usa esta cuando diga "cambia el 1 a 500", "edita el 2 a $600", "cambia la categoría del 1 a Comida", "cambia el 2 a Entretenimiento", "modifica la descripción del 3", etc.',
             parameters: {
                 type: 'object',
                 properties: {
@@ -161,22 +161,35 @@ async function getOpenAIFunctions() {
                     },
                     nuevo_monto: {
                         type: 'number',
-                        description: 'Nuevo monto para la transacción'
+                        description: 'Nuevo monto para la transacción (opcional)'
+                    },
+                    nueva_categoria: {
+                        type: 'string',
+                        description: 'Nueva categoría para la transacción (opcional)',
+                        enum: categories.map(c => c.name)
+                    },
+                    nueva_descripcion: {
+                        type: 'string',
+                        description: 'Nueva descripción para la transacción (opcional)'
+                    },
+                    nueva_fecha: {
+                        type: 'string',
+                        description: 'Nueva fecha en formato YYYY-MM-DD (opcional)'
                     }
                 },
-                required: ['numero', 'nuevo_monto']
+                required: ['numero']
             }
         },
         {
             name: 'consultar_categorias',
-            description: 'Lista las categorías disponibles. Usa esta cuando el usuario pregunte "qué categorías hay", "qué categorías existen", "en qué puedo gastar", "cuáles son las categorías", "qué categorías personalizadas tengo", "muestra mis categorías", etc.',
+            description: 'Lista las categorías disponibles. Usa esta cuando el usuario pregunte "qué categorías hay", "qué categorías existen", "en qué puedo gastar", "cuáles son las categorías", "ver categorías", "qué categorías personalizadas tengo", "ver categorías personalizadas", "muestra mis categorías", "mis categorías", etc. IMPORTANTE: cuando diga "ver categorías personalizadas", "mis categorías" o "categorías personalizadas" usa tipo_categoria: personalizadas.',
             parameters: {
                 type: 'object',
                 properties: {
                     tipo_categoria: {
                         type: 'string',
                         enum: ['gasto', 'todas', 'personalizadas'],
-                        description: 'Tipo de categorías a mostrar. "todas" muestra todas las categorías (predefinidas y personalizadas), "personalizadas" solo las creadas por el usuario, "gasto" categorías de gastos.'
+                        description: 'Tipo de categorías a mostrar. "todas" muestra todas las categorías (predefinidas y personalizadas), "personalizadas" solo las creadas por el usuario (NO incluye las predefinidas como Comida, Transporte, etc.), "gasto" categorías de gastos.'
                     }
                 }
             }
@@ -582,6 +595,12 @@ CONSULTAR ESTADO - MES ACTUAL:
 - "¿cuánto he gastado en comida?" → consultar_estado (periodo: mes_actual, filtro_categoria: Comida, filtro_tipo: gasto)
 - "¿cuál es mi estado actual?" → consultar_estado (periodo: mes_actual)
 
+CONSULTAR ESTADO - MES HASTA HOY:
+- "¿cuánto llevo del mes?" → consultar_estado (periodo: mes_hasta_hoy, filtro_tipo: gasto)
+- "estado del mes hasta hoy" → consultar_estado (periodo: mes_hasta_hoy)
+- "¿cuánto he gastado del mes hasta hoy?" → consultar_estado (periodo: mes_hasta_hoy, filtro_tipo: gasto)
+- "resumen hasta hoy" → consultar_estado (periodo: mes_hasta_hoy)
+
 CONSULTAR ESTADO - MES PASADO:
 - "¿cómo me fue el mes pasado?" → consultar_estado (periodo: mes_pasado)
 - "¿cuánto gasté el mes anterior?" → consultar_estado (periodo: mes_pasado, filtro_tipo: gasto)
@@ -589,12 +608,24 @@ CONSULTAR ESTADO - MES PASADO:
 - "quiero saber mis gastos del mes pasado" → consultar_estado (periodo: mes_pasado, filtro_tipo: gasto)
 - "gastos en comida del mes que pasó" → consultar_estado (periodo: mes_pasado, filtro_categoria: Comida, filtro_tipo: gasto)
 
+CONSULTAR ESTADO - HOY:
+- "gastos de hoy" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
+- "¿cuánto gasté hoy?" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
+- "¿cuánto llevo gastado hoy?" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
+- "ver mis gastos de hoy" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
+
 CONSULTAR ESTADO - OTROS PERIODOS:
 - "¿cómo voy esta semana?" → consultar_estado (periodo: semana_actual)
-- "gastos de hoy" → consultar_estado (periodo: hoy, filtro_tipo: gasto)
 - "¿cuánto gasté esta semana?" → consultar_estado (periodo: semana_actual, filtro_tipo: gasto)
 
 LISTAR GASTOS DETALLE (cuando quieren VER la lista específica):
+- "muestra mis gastos de hoy" → listar_transacciones (tipo: gasto, periodo: hoy)
+- "ver los gastos de hoy" → listar_transacciones (tipo: gasto, periodo: hoy)
+- "lista de gastos de hoy" → listar_transacciones (tipo: gasto, periodo: hoy)
+- "ver todos los gastos hasta hoy" → listar_transacciones (tipo: gasto, periodo: mes_hasta_hoy)
+- "muestra los gastos del mes hasta hoy" → listar_transacciones (tipo: gasto, periodo: mes_hasta_hoy)
+- "gastos de este mes hasta hoy" → listar_transacciones (tipo: gasto, periodo: mes_hasta_hoy)
+- "todos mis gastos hasta hoy" → listar_transacciones (tipo: gasto, periodo: mes_hasta_hoy)
 - "¿qué servicios tengo registrados?" → listar_transacciones (categoria: Servicios, tipo: gasto, periodo: todos)
 - "muestra mis gastos en comida" → listar_transacciones (categoria: Comida, tipo: gasto, periodo: todos)
 - "ver mis gastos de transporte" → listar_transacciones (categoria: Transporte, tipo: gasto, periodo: todos)
@@ -614,14 +645,25 @@ EDITAR TRANSACCIONES:
 - "cambia el 1 a 500" → editar_transaccion (numero: 1, nuevo_monto: 500)
 - "edita el 2 a $600" → editar_transaccion (numero: 2, nuevo_monto: 600)
 - "modifica la transacción 3 a 1000" → editar_transaccion (numero: 3, nuevo_monto: 1000)
+- "cambia la categoría del 1 a Comida" → editar_transaccion (numero: 1, nueva_categoria: Comida)
+- "cambia el 2 a Entretenimiento" → editar_transaccion (numero: 2, nueva_categoria: Entretenimiento)
+- "modifica la categoría del gasto 3 a Transporte" → editar_transaccion (numero: 3, nueva_categoria: Transporte)
+- "cambia la descripción del 1 a Netflix" → editar_transaccion (numero: 1, nueva_descripcion: Netflix)
 
 CONSULTAR CATEGORÍAS:
 - "¿qué categorías existen?" → consultar_categorias (tipo_categoria: todas)
 - "¿en qué puedo gastar?" → consultar_categorias (tipo_categoria: gasto)
 - "muéstrame las categorías" → consultar_categorias (tipo_categoria: todas)
-- "¿qué categorías personalizadas tengo?" → consultar_categorias (tipo_categoria: personalizadas)
-- "muestra mis categorías" → consultar_categorias (tipo_categoria: personalizadas)
 - "lista todas las categorías" → consultar_categorias (tipo_categoria: todas)
+- "ver categorías" → consultar_categorias (tipo_categoria: todas)
+
+CONSULTAR CATEGORÍAS PERSONALIZADAS:
+- "¿qué categorías personalizadas tengo?" → consultar_categorias (tipo_categoria: personalizadas)
+- "ver categorías personalizadas" → consultar_categorias (tipo_categoria: personalizadas)
+- "muestra mis categorías personalizadas" → consultar_categorias (tipo_categoria: personalizadas)
+- "categorías personalizadas" → consultar_categorias (tipo_categoria: personalizadas)
+- "mis categorías" → consultar_categorias (tipo_categoria: personalizadas)
+- "muestra mis categorías" → consultar_categorias (tipo_categoria: personalizadas)
 
 CREAR CATEGORÍAS PERSONALIZADAS:
 - "crea una categoría llamada Mascotas" → crear_categoria (nombre: Mascotas, tipo: gasto)
@@ -781,6 +823,7 @@ Agrega al final (en una línea separada con emoji 💡) una sugerencia amigable 
                 // Mapear periodo a texto legible en español
                 const periodoTexto = {
                     'mes_actual': 'este mes',
+                    'mes_hasta_hoy': 'del mes hasta hoy',
                     'mes_pasado': 'el mes pasado',
                     'semana_actual': 'esta semana',
                     'hoy': 'hoy',
@@ -851,11 +894,35 @@ Genera una confirmación breve (1-2 líneas) diciendo que se eliminó correctame
                 break;
 
             case 'editar_transaccion':
-                prompt = `El usuario editó la transacción #${result.numero}.
+                if (result.changes && result.changes.length > 0) {
+                    // Nueva versión con soporte para múltiples campos
+                    const changesText = result.changes.map(c => {
+                        switch(c.field) {
+                            case 'monto':
+                                return `el monto de $${c.old} a $${c.new}`;
+                            case 'categoria':
+                                return `la categoría de "${c.old}" a "${c.new}"`;
+                            case 'descripcion':
+                                return `la descripción a "${c.new}"`;
+                            case 'fecha':
+                                return `la fecha a ${c.new}`;
+                            default:
+                                return `${c.field}`;
+                        }
+                    }).join(', ');
+
+                    prompt = `El usuario editó la transacción #${result.numero}.
+Cambió: ${changesText}.
+
+Genera una confirmación breve (1-2 líneas) diciendo que se actualizó correctamente.`;
+                } else {
+                    // Versión legacy (solo monto)
+                    prompt = `El usuario editó la transacción #${result.numero}.
 Cambió el monto de $${result.oldAmount} a $${result.newAmount}.
 Descripción: ${result.transaction.description}
 
 Genera una confirmación breve (1-2 líneas) diciendo que se actualizó el monto correctamente.`;
+                }
                 break;
 
             default:
