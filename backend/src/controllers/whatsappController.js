@@ -1,7 +1,10 @@
 /**
  * BUBU - WhatsApp Controller
  * Controlador para manejar webhooks de WhatsApp Business API
+ * VERSION: 2025-11-23-debug-v2
  */
+
+console.log('🔧 [WHATSAPP CONTROLLER] Cargando versión con logs de debug 2025-11-23-debug-v2');
 
 import { sendWhatsAppMessage, sendInteractiveList, sendInteractiveButtons, markAsRead, extractMessageFromWebhook, verifyWebhook } from '../services/whatsappService.js';
 import { parseIntent, generateNaturalResponse } from '../services/openaiService.js';
