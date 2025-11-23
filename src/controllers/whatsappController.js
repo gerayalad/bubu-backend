@@ -1,16 +1,20 @@
 /**
  * BUBU - WhatsApp Controller
  * Controlador para manejar webhooks de WhatsApp Business API
+ * VERSION: 2025-11-23-debug-v2
  */
+
+console.log('🔧 [WHATSAPP CONTROLLER] Cargando versión con logs de debug 2025-11-23-debug-v2');
 
 import { sendWhatsAppMessage, sendInteractiveList, sendInteractiveButtons, markAsRead, extractMessageFromWebhook, verifyWebhook } from '../services/whatsappService.js';
 import { parseIntent, generateNaturalResponse } from '../services/openaiService.js';
 import { getOrCreateUser } from '../services/userService.js';
 import { createTransaction, getFinancialSummary, getUserTransactions, deleteTransaction, updateTransaction } from '../services/transactionService.js';
-import { getCategoryByName, suggestCategory, getAllCategories } from '../services/categoryService.js';
+import { getCategoryByName, suggestCategory, getAllCategories, createCategory, updateCategory, deleteCategory, moveTransactionsBetweenCategories } from '../services/categoryService.js';
 import { saveChatMessage } from '../services/chatService.js';
 import { saveTransactionList, getTransactionByNumber, savePendingTransaction, getPendingTransaction, clearPendingTransaction, saveLastTransaction, getLastTransaction, savePendingAudio, getPendingAudio, clearPendingAudio, savePendingReceipt, getPendingReceipt, clearPendingReceipt } from '../services/contextService.js';
 import { getTodayMexico, toMexicoDateString } from '../utils/dateUtils.js';
+import { selectIcon, selectColor } from '../utils/iconMapper.js';
 import { transcribeAudio, isSupportedAudioFormat } from '../services/audioTranscriptionService.js';
 import {
     saveTransactionContext,
@@ -237,6 +241,9 @@ async function processWhatsAppMessage(user_phone, message) {
         let result;
         let response;
 
+        console.log(`🎯 [DEBUG] intent.action detectado: "${intent.action}"`);
+        console.log(`📦 [DEBUG] intent.parameters:`, JSON.stringify(intent.parameters, null, 2));
+
         switch (intent.action) {
             case 'confirmar_transaccion':
                 result = await handleConfirmarTransaccion(normalizedPhone, user_phone, intent.parameters);
@@ -314,6 +321,29 @@ async function processWhatsAppMessage(user_phone, message) {
                 response = result.response;
                 break;
 
+            case 'crear_categoria':
+                console.log(`✨ [DEBUG] Ejecutando handleCrearCategoria con params:`, intent.parameters);
+                result = await handleCrearCategoria(intent.parameters);
+                console.log(`✅ [DEBUG] Resultado de handleCrearCategoria:`, result);
+                response = result.response;
+                console.log(`💬 [DEBUG] Respuesta a enviar: "${response}"`);
+                break;
+
+            case 'editar_categoria':
+                result = await handleEditarCategoria(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'eliminar_categoria':
+                result = await handleEliminarCategoria(intent.parameters);
+                response = result.response;
+                break;
+
+            case 'mover_transacciones_categoria':
+                result = await handleMoverTransaccionesCategoria(normalizedPhone, intent.parameters);
+                response = result.response;
+                break;
+
             case 'ayuda_uso':
                 result = null;
                 response = handleAyudaUso(intent.parameters);
@@ -362,6 +392,8 @@ async function processWhatsAppMessage(user_phone, message) {
 
         // Guardar y enviar respuesta (si existe)
         if (response) {
+            console.log(`📤 [DEBUG] Enviando respuesta a ${user_phone}: "${response}"`);
+
             await saveChatMessage({
                 user_phone: normalizedPhone,
                 role: 'assistant',
@@ -1547,6 +1579,259 @@ async function processAudioMessage(user_phone, mediaId, mimeType, messageId) {
             user_phone,
             'Lo siento, tuve un problema procesando el audio. ¿Puedes intentar de nuevo o escribirlo manualmente?'
         );
+    }
+}
+
+/**
+ * Maneja la creación de una categoría personalizada
+ */
+async function handleCrearCategoria(params) {
+    console.log(`🏷️ [handleCrearCategoria] Iniciando con params:`, params);
+    const { nombre, tipo } = params;
+    console.log(`🏷️ [handleCrearCategoria] nombre: "${nombre}", tipo: "${tipo}"`);
+
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
+
+    // Verificar si la categoría ya existe
+    console.log(`🔍 [handleCrearCategoria] Verificando si existe categoría "${nombre}"...`);
+    const existing = await getCategoryByName(nombre);
+    console.log(`🔍 [handleCrearCategoria] Categoría existente:`, existing);
+
+    if (existing) {
+        const errorResponse = `Ya existe una categoría llamada "${nombre}". ¿Quieres usar otro nombre?`;
+        console.log(`⚠️ [handleCrearCategoria] Categoría ya existe. Respuesta:`, errorResponse);
+        return {
+            response: errorResponse
+        };
+    }
+
+    // Seleccionar icono y color automáticamente
+    const icon = selectIcon(nombre, type);
+    const color = selectColor(type);
+    console.log(`🎨 [handleCrearCategoria] Icon: "${icon}", Color: "${color}"`);
+
+    try {
+        console.log(`💾 [handleCrearCategoria] Intentando crear categoría en BD...`);
+        // Crear la categoría
+        const newCategory = await createCategory({
+            name: nombre,
+            type: type,
+            color: color,
+            icon: icon
+        });
+        console.log(`✅ [handleCrearCategoria] Categoría creada exitosamente:`, newCategory);
+
+        const tipoTexto = 'gastos';
+        const response = `✅ ¡Listo! Creé la categoría "${nombre}" ${icon} para ${tipoTexto}. Ya puedes usarla en tus transacciones.`;
+        console.log(`💬 [handleCrearCategoria] Respuesta generada: "${response}"`);
+
+        return {
+            category: newCategory,
+            response
+        };
+    } catch (error) {
+        console.error('❌ [handleCrearCategoria] Error creando categoría:', error);
+        console.error('❌ [handleCrearCategoria] Error stack:', error.stack);
+
+        // Manejar error de nombre duplicado
+        if (error.message.includes('duplicate') || error.message.includes('unique')) {
+            return {
+                response: `Ya existe una categoría con el nombre "${nombre}". ¿Quieres usar otro nombre?`
+            };
+        }
+
+        return {
+            response: `❌ Error al crear la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la edición de una categoría personalizada
+ */
+async function handleEditarCategoria(params) {
+    const { nombre_actual, nombre_nuevo, color_nuevo, icono_nuevo } = params;
+
+    // Buscar la categoría actual
+    const category = await getCategoryByName(nombre_actual);
+    if (!category) {
+        return {
+            response: `No encontré ninguna categoría llamada "${nombre_actual}". ¿Quieres verificar el nombre?`
+        };
+    }
+
+    // Validar que sea una categoría personalizada
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        return {
+            response: `No puedo editar "${category.name}" porque es una categoría predefinida. Solo puedes editar categorías personalizadas.`
+        };
+    }
+
+    try {
+        // Preparar datos de actualización
+        const updateData = {};
+        if (nombre_nuevo) updateData.name = nombre_nuevo;
+        if (color_nuevo) updateData.color = color_nuevo;
+        if (icono_nuevo !== undefined) updateData.icon = icono_nuevo;
+
+        // Actualizar categoría
+        const updated = await updateCategory(category.id, updateData);
+
+        // Generar respuesta según lo que se cambió
+        const changes = [];
+        if (nombre_nuevo) changes.push(`nombre a "${nombre_nuevo}"`);
+        if (color_nuevo) changes.push('color');
+        if (icono_nuevo !== undefined) changes.push('icono');
+
+        const changesText = changes.join(', ');
+        const response = `✅ Listo! Actualicé ${changesText} de la categoría ${updated.icon ? updated.icon : ''} "${updated.name}".`;
+
+        return {
+            category: updated,
+            response
+        };
+    } catch (error) {
+        console.error('Error editando categoría:', error);
+
+        if (error.message.includes('Ya existe')) {
+            return {
+                response: `Ya existe una categoría con el nombre "${nombre_nuevo}". ¿Quieres usar otro nombre?`
+            };
+        }
+
+        return {
+            response: `❌ Error al editar la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja la eliminación de una categoría personalizada
+ */
+async function handleEliminarCategoria(params) {
+    const { nombre } = params;
+
+    // Buscar la categoría
+    const category = await getCategoryByName(nombre);
+    if (!category) {
+        return {
+            response: `No encontré ninguna categoría llamada "${nombre}". ¿Quieres verificar el nombre?`
+        };
+    }
+
+    // Validar que sea una categoría personalizada
+    const predefinedCategories = [
+        'Comida', 'Transporte', 'Entretenimiento', 'Servicios', 'Salud',
+        'Educación', 'Ropa', 'Hogar', 'Otros Gastos'
+    ];
+
+    if (predefinedCategories.includes(category.name)) {
+        return {
+            response: `No puedo eliminar "${category.name}" porque es una categoría predefinida del sistema.`
+        };
+    }
+
+    try {
+        // Eliminar categoría
+        const result = await deleteCategory(category.id);
+
+        let response;
+        if (result.movedTransactions > 0) {
+            response = `✅ Categoría "${result.deleted.name}" eliminada. ${result.movedTransactions} transacción${result.movedTransactions > 1 ? 'es' : ''} ${result.movedTransactions > 1 ? 'fueron movidas' : 'fue movida'} a "${result.movedTo}".`;
+        } else {
+            response = `✅ Categoría "${result.deleted.name}" eliminada correctamente.`;
+        }
+
+        return {
+            result,
+            response
+        };
+    } catch (error) {
+        console.error('Error eliminando categoría:', error);
+        return {
+            response: `❌ Error al eliminar la categoría: ${error.message}`
+        };
+    }
+}
+
+/**
+ * Maneja el movimiento de transacciones entre categorías
+ */
+async function handleMoverTransaccionesCategoria(user_phone, params) {
+    const { categoria_origen, categoria_destino, tipo } = params;
+
+    // Convertir tipo a formato de BD (solo expense, no hay income)
+    const type = 'expense';
+
+    try {
+        // Buscar categoría origen
+        const fromCategory = await getCategoryByName(categoria_origen);
+        if (!fromCategory) {
+            return {
+                response: `No encontré ninguna categoría llamada "${categoria_origen}". ¿Quieres verificar el nombre?`
+            };
+        }
+
+        // Verificar que sea una categoría de gastos
+        if (fromCategory.type !== 'expense') {
+            return {
+                response: `La categoría "${categoria_origen}" no es una categoría de gastos válida.`
+            };
+        }
+
+        // Buscar o crear categoría destino
+        let toCategory = await getCategoryByName(categoria_destino);
+        if (!toCategory) {
+            // Crear automáticamente la categoría destino
+            const icon = selectIcon(categoria_destino, type);
+            const color = selectColor(type);
+
+            toCategory = await createCategory({
+                name: categoria_destino,
+                type: type,
+                color: color,
+                icon: icon
+            });
+
+            console.log(`✨ Categoría "${categoria_destino}" creada automáticamente`);
+        } else {
+            // Verificar que sea una categoría de gastos
+            if (toCategory.type !== 'expense') {
+                return {
+                    response: `La categoría destino "${categoria_destino}" no es una categoría de gastos válida.`
+                };
+            }
+        }
+
+        // Mover las transacciones
+        const result = await moveTransactionsBetweenCategories(
+            fromCategory.id,
+            toCategory.id,
+            user_phone
+        );
+
+        let response;
+        if (result.movedCount > 0) {
+            response = `✅ Moví ${result.movedCount} transacción${result.movedCount > 1 ? 'es' : ''} de "${fromCategory.name}" a "${toCategory.name}".`;
+        } else {
+            response = `No había transacciones en la categoría "${fromCategory.name}" para mover.`;
+        }
+
+        return {
+            result,
+            response
+        };
+    } catch (error) {
+        console.error('Error moviendo transacciones:', error);
+        return {
+            response: `❌ Error al mover transacciones: ${error.message}`
+        };
     }
 }
 

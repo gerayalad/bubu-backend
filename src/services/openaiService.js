@@ -196,13 +196,13 @@ async function getOpenAIFunctions() {
         },
         {
             name: 'crear_categoria',
-            description: 'Crea una nueva categoría personalizada de gastos. Usa esta cuando el usuario pida explícitamente crear una categoría nueva. Ejemplos: "crea una categoría llamada Mascotas", "nueva categoría Cafetería", "crea categoría Gimnasio".',
+            description: 'Crea una nueva categoría personalizada de gastos. Usa esta cuando el usuario pida explícitamente crear una categoría nueva. IMPORTANTE: Detecta el nombre de la categoría incluso si dice "personalizada" en medio. Ejemplos: "crea una categoría llamada Mascotas", "nueva categoría Cafetería", "crea categoría Gimnasio", "crea categoría personalizada AI Tools" (nombre: AI Tools), "nueva categoría personalizada Netflix" (nombre: Netflix).',
             parameters: {
                 type: 'object',
                 properties: {
                     nombre: {
                         type: 'string',
-                        description: 'Nombre de la nueva categoría según lo que dijo el usuario'
+                        description: 'Nombre de la nueva categoría según lo que dijo el usuario. Extrae solo el nombre real, ignorando palabras como "categoría", "personalizada", "nueva", etc. Ejemplo: si dice "crea categoría personalizada AI Tools", el nombre es "AI Tools".'
                     },
                     tipo: {
                         type: 'string',
@@ -669,6 +669,9 @@ CREAR CATEGORÍAS PERSONALIZADAS:
 - "crea una categoría llamada Mascotas" → crear_categoria (nombre: Mascotas, tipo: gasto)
 - "nueva categoría Cafetería" → crear_categoria (nombre: Cafetería, tipo: gasto)
 - "crea categoría gimnasio" → crear_categoria (nombre: Gimnasio, tipo: gasto)
+- "crea categoría personalizada AI Tools" → crear_categoria (nombre: AI Tools, tipo: gasto)
+- "crea categoría AI Tools" → crear_categoria (nombre: AI Tools, tipo: gasto)
+- "nueva categoría personalizada Netflix" → crear_categoria (nombre: Netflix, tipo: gasto)
 - "quiero una categoría que se llame Videojuegos" → crear_categoria (nombre: Videojuegos, tipo: gasto)
 - "crea categoría Mascotas para gastos" → crear_categoria (nombre: Mascotas, tipo: gasto)
 
