@@ -419,35 +419,31 @@ async function handleRegistrarTransaccion(user_phone, params) {
             split_custom_partner
         );
 
-        // Determinar quién pagó y configurar parámetros correctamente
-        let payer_phone, partner_phone_for_tx, split_payer, split_partner;
+        // Determinar quién pagó
+        let payer_phone;
 
         if (quien_pago === 'pareja') {
             // La pareja pagó
-            payer_phone = splitInfo.partner_phone;  // Pareja es el payer
-            partner_phone_for_tx = user_phone;       // Usuario es el partner
-            split_payer = splitInfo.partner_split;   // Porcentaje de quien pagó (pareja)
-            split_partner = splitInfo.user_split;    // Porcentaje del otro (usuario)
+            payer_phone = splitInfo.partner_phone;
         } else {
             // Yo pagué (default: 'yo' o null)
-            payer_phone = user_phone;                     // Usuario es el payer
-            partner_phone_for_tx = splitInfo.partner_phone; // Pareja es el partner
-            split_payer = splitInfo.user_split;          // Porcentaje de quien pagó (usuario)
-            split_partner = splitInfo.partner_split;     // Porcentaje del otro (pareja)
+            payer_phone = user_phone;
         }
 
-        console.log(`💰 División: Pagador ${split_payer}% / Partner ${split_partner}% | Pagador: ${payer_phone}`);
+        console.log(`💰 División: User ${splitInfo.user_split}% / Partner ${splitInfo.partner_split}% | Pagador: ${payer_phone}`);
 
         // Crear gasto compartido (esto crea 2 transacciones)
+        // IMPORTANTE: split_user1/split_user2 deben coincidir con las posiciones fijas
+        // user1=user_phone, user2=partner_phone según la relación, NO según quien pagó
         const sharedTransaction = await createSharedTransaction({
             payer_phone,
-            partner_phone: partner_phone_for_tx,
+            partner_phone: splitInfo.partner_phone,
             total_amount: monto,
             category_id: category.id,
             type,
             description: descripcion,
-            split_user1: split_payer,     // Porcentaje de quien pagó
-            split_user2: split_partner,   // Porcentaje del otro
+            split_user1: splitInfo.user_split,      // Siempre el % del usuario actual (user1 en relación)
+            split_user2: splitInfo.partner_split,   // Siempre el % de la pareja (user2 en relación)
             transaction_date: transactionDate,
             relationship_id: relationship.id
         });
