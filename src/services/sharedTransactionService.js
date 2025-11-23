@@ -54,16 +54,31 @@ export async function createSharedTransaction(data) {
 
     const finalDate = transaction_date || getTodayMexico();
 
+    // Obtener la relación para determinar quién es user1 y user2 consistentemente
+    const relationship = await queryOne('SELECT * FROM relationships WHERE id = $1', [relationship_id]);
+
+    if (!relationship) {
+        throw new Error('Relación no encontrada');
+    }
+
+    // user1 SIEMPRE es relationship.user_phone_1
+    // user2 SIEMPRE es relationship.user_phone_2
+    const user1_phone = relationship.user_phone_1;
+    const user2_phone = relationship.user_phone_2;
+
     // Calcular montos individuales
     const amount_user1 = (total_amount * split_user1) / 100;
     const amount_user2 = (total_amount * split_user2) / 100;
 
-    console.log(`💳 Creando gasto compartido: $${total_amount} → $${amount_user1} (${split_user1}%) + $${amount_user2} (${split_user2}%)`);
+    console.log(`💳 Creando gasto compartido: $${total_amount}`);
+    console.log(`   User1 (${user1_phone}): $${amount_user1} (${split_user1}%)`);
+    console.log(`   User2 (${user2_phone}): $${amount_user2} (${split_user2}%)`);
+    console.log(`   Pagó: ${payer_phone}`);
 
     try {
-        // 1. Crear transacción para usuario 1 (payer)
+        // 1. Crear transacción para user1 (SIEMPRE user_phone_1 de la relación)
         const transaction1 = await createTransaction({
-            user_phone: payer_phone,
+            user_phone: user1_phone,
             category_id,
             type,
             amount: amount_user1,
@@ -71,9 +86,9 @@ export async function createSharedTransaction(data) {
             transaction_date: finalDate
         });
 
-        // 2. Crear transacción para usuario 2 (partner)
+        // 2. Crear transacción para user2 (SIEMPRE user_phone_2 de la relación)
         const transaction2 = await createTransaction({
-            user_phone: partner_phone,
+            user_phone: user2_phone,
             category_id,
             type,
             amount: amount_user2,
@@ -123,13 +138,13 @@ export async function createSharedTransaction(data) {
             payer_phone,
             partner_phone,
             user1: {
-                phone: payer_phone,
+                phone: user1_phone,
                 transaction_id: transaction1.id,
                 amount: parseFloat(amount_user1),
                 percentage: parseFloat(split_user1)
             },
             user2: {
-                phone: partner_phone,
+                phone: user2_phone,
                 transaction_id: transaction2.id,
                 amount: parseFloat(amount_user2),
                 percentage: parseFloat(split_user2)
