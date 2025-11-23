@@ -392,6 +392,8 @@ async function processWhatsAppMessage(user_phone, message) {
 
         // Guardar y enviar respuesta (si existe)
         if (response) {
+            console.log(`📤 [DEBUG] Enviando respuesta a ${user_phone}: "${response}"`);
+
             await saveChatMessage({
                 user_phone: normalizedPhone,
                 role: 'assistant',
