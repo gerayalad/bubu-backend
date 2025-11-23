@@ -1,0 +1,168 @@
+/**
+ * BUBU - Estilos de Login Screen
+ */
+
+.container {
+    width: 100%;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+}
+
+.card {
+    width: 90%;
+    max-width: 450px;
+    padding: var(--spacing-2xl);
+    background: var(--bg-primary);
+    border-radius: var(--radius-xl);
+    box-shadow:
+        20px 20px 60px var(--shadow-dark),
+        -20px -20px 60px var(--shadow-light);
+    text-align: center;
+    animation: slideUp 0.5s ease-out;
+}
+
+.logo {
+    font-size: 4rem;
+    margin-bottom: var(--spacing-md);
+}
+
+.title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0 0 var(--spacing-sm) 0;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.subtitle {
+    color: var(--text-secondary);
+    margin: 0 0 var(--spacing-xl) 0;
+    font-size: 1.1rem;
+}
+
+.form {
+    margin-top: var(--spacing-xl);
+}
+
+.inputGroup {
+    margin-bottom: var(--spacing-lg);
+    text-align: left;
+}
+
+.label {
+    display: block;
+    margin-bottom: var(--spacing-sm);
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.95rem;
+}
+
+.input {
+    width: 100%;
+    padding: var(--spacing-md) var(--spacing-lg);
+    background: var(--bg-primary);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 1.1rem;
+    color: var(--text-primary);
+    font-family: inherit;
+    text-align: center;
+    letter-spacing: 1px;
+    box-shadow:
+        inset 6px 6px 12px var(--shadow-dark),
+        inset -6px -6px 12px var(--shadow-light);
+    transition: all var(--transition-normal);
+}
+
+.input:focus {
+    outline: none;
+    box-shadow:
+        inset 8px 8px 16px var(--shadow-dark),
+        inset -8px -8px 16px var(--shadow-light);
+}
+
+.hint {
+    display: block;
+    margin-top: var(--spacing-sm);
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    text-align: center;
+}
+
+.button {
+    width: 100%;
+    padding: var(--spacing-md) var(--spacing-lg);
+    margin-top: var(--spacing-lg);
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+    color: white;
+    border: none;
+    border-radius: var(--radius-pill);
+    font-size: 1.1rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    box-shadow:
+        6px 6px 12px rgba(102, 126, 234, 0.3),
+        -2px -2px 8px rgba(255, 255, 255, 0.5);
+    transition: all var(--transition-normal);
+}
+
+.button:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow:
+        8px 8px 16px rgba(102, 126, 234, 0.4),
+        -4px -4px 12px rgba(255, 255, 255, 0.6);
+}
+
+.button:active:not(:disabled) {
+    transform: translateY(0);
+}
+
+.button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.error {
+    padding: var(--spacing-md);
+    margin-top: var(--spacing-md);
+    background: linear-gradient(145deg, #fef2f2, #fee2e2);
+    color: var(--danger);
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    box-shadow:
+        inset 2px 2px 4px rgba(239, 68, 68, 0.1),
+        inset -2px -2px 4px rgba(255, 255, 255, 0.5);
+}
+
+.footer {
+    margin-top: var(--spacing-xl);
+    padding-top: var(--spacing-lg);
+    border-top: 1px solid rgba(163, 177, 198, 0.2);
+}
+
+.footerText {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+@media (max-width: 768px) {
+    .card {
+        width: 95%;
+        padding: var(--spacing-xl);
+    }
+
+    .title {
+        font-size: 2rem;
+    }
+
+    .logo {
+        font-size: 3rem;
+    }
+}
