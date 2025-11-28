@@ -55,11 +55,11 @@ async function getOpenAIFunctions() {
                     },
                     split_custom_user: {
                         type: 'number',
-                        description: 'Porcentaje custom del usuario si especifica división. Ejemplos: "50/50" → 50, "40/60" → 40, "mitad" → 50, "partes iguales" → 50, "70/30" → 70. null si usa división default'
+                        description: 'SOLO si el usuario EXPLÍCITAMENTE menciona una división específica. Ejemplos donde SÍ aplica: "50/50" → 50, "40/60" → 40, "mitad y mitad" → 50, "partes iguales" → 50, "70/30" → 70. IMPORTANTE: Si el usuario NO menciona porcentajes ni división (ej: "pagó mi pareja" sin más), este valor DEBE ser null para usar la división default de la pareja.'
                     },
                     split_custom_partner: {
                         type: 'number',
-                        description: 'Porcentaje custom de la pareja. Ejemplos: "50/50" → 50, "40/60" → 60, "mitad" → 50, "partes iguales" → 50, "70/30" → 30. null si usa división default. Debe sumar 100 con split_custom_user'
+                        description: 'SOLO si el usuario EXPLÍCITAMENTE menciona una división específica. Complemento de split_custom_user. Ejemplos: "50/50" → 50, "40/60" → 60, "70/30" → 30. IMPORTANTE: Si el usuario NO menciona porcentajes ni división, este valor DEBE ser null. Ambos deben ser null o ambos tener valor (sumando 100).'
                     }
                 },
                 required: ['tipo', 'monto', 'descripcion', 'categoria']

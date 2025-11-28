@@ -430,11 +430,14 @@ async function handleRegistrarTransaccion(user_phone, params) {
             payer_phone = user_phone;
         }
 
+        // Determinar si el usuario actual es user1 o user2 en la relación
+        const currentUserIsUser1 = relationship.user_phone_1 === user_phone;
+
         console.log(`💰 División: User ${splitInfo.user_split}% / Partner ${splitInfo.partner_split}% | Pagador: ${payer_phone}`);
 
         // Crear gasto compartido (esto crea 2 transacciones)
-        // IMPORTANTE: split_user1/split_user2 deben coincidir con las posiciones fijas
-        // user1=user_phone, user2=partner_phone según la relación, NO según quien pagó
+        // IMPORTANTE: split_user1/split_user2 deben corresponder a user_phone_1/user_phone_2 de la relación
+        // NO al usuario que hace la solicitud
         const sharedTransaction = await createSharedTransaction({
             payer_phone,
             partner_phone: splitInfo.partner_phone,
@@ -442,8 +445,10 @@ async function handleRegistrarTransaccion(user_phone, params) {
             category_id: category.id,
             type,
             description: descripcion,
-            split_user1: splitInfo.user_split,      // Siempre el % del usuario actual (user1 en relación)
-            split_user2: splitInfo.partner_split,   // Siempre el % de la pareja (user2 en relación)
+            // Si el usuario actual es user1, su split va en split_user1
+            // Si el usuario actual es user2, su split va en split_user2
+            split_user1: currentUserIsUser1 ? splitInfo.user_split : splitInfo.partner_split,
+            split_user2: currentUserIsUser1 ? splitInfo.partner_split : splitInfo.user_split,
             transaction_date: transactionDate,
             relationship_id: relationship.id
         });
