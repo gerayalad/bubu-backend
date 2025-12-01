@@ -13,6 +13,35 @@ const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
 
 /**
+ * Formatea un número de teléfono para envío por WhatsApp API
+ * Números mexicanos de 10 dígitos necesitan prefijo 521
+ * @param {string} phone - Número de teléfono
+ * @returns {string} Número formateado para WhatsApp
+ */
+function formatPhoneForWhatsApp(phone) {
+    // Limpiar el número
+    let cleaned = phone.replace(/[\s\-\(\)\+]/g, '');
+
+    // Si ya tiene 13 dígitos y empieza con 521, está bien
+    if (cleaned.length === 13 && cleaned.startsWith('521')) {
+        return cleaned;
+    }
+
+    // Si tiene 12 dígitos y empieza con 52, agregar el 1
+    if (cleaned.length === 12 && cleaned.startsWith('52')) {
+        return '521' + cleaned.substring(2);
+    }
+
+    // Si tiene 10 dígitos (número mexicano normalizado), agregar 521
+    if (cleaned.length === 10) {
+        return '521' + cleaned;
+    }
+
+    // Para otros formatos, retornar como está
+    return cleaned;
+}
+
+/**
  * Envía un mensaje de texto por WhatsApp
  * @param {string} to - Número de teléfono del destinatario (sin +)
  * @param {string} message - Mensaje a enviar
@@ -21,10 +50,11 @@ const ACCESS_TOKEN = process.env.WHATSAPP_TOKEN;
 export async function sendWhatsAppMessage(to, message) {
     try {
         const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
+        const formattedPhone = formatPhoneForWhatsApp(to);
 
         const data = {
             messaging_product: 'whatsapp',
-            to: to,
+            to: formattedPhone,
             type: 'text',
             text: {
                 body: message
@@ -38,7 +68,7 @@ export async function sendWhatsAppMessage(to, message) {
             }
         });
 
-        console.log('✅ Mensaje enviado a WhatsApp:', to);
+        console.log('✅ Mensaje enviado a WhatsApp:', formattedPhone);
         return response.data;
 
     } catch (error) {
@@ -59,11 +89,12 @@ export async function sendWhatsAppMessage(to, message) {
 export async function sendInteractiveList(to, header, body, buttonText, sections) {
     try {
         const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
+        const formattedPhone = formatPhoneForWhatsApp(to);
 
         const data = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
-            to: to,
+            to: formattedPhone,
             type: 'interactive',
             interactive: {
                 type: 'list',
@@ -88,7 +119,7 @@ export async function sendInteractiveList(to, header, body, buttonText, sections
             }
         });
 
-        console.log('✅ Lista interactiva enviada a WhatsApp:', to);
+        console.log('✅ Lista interactiva enviada a WhatsApp:', formattedPhone);
         return response.data;
 
     } catch (error) {
@@ -107,11 +138,12 @@ export async function sendInteractiveList(to, header, body, buttonText, sections
 export async function sendInteractiveButtons(to, body, buttons) {
     try {
         const url = `${WHATSAPP_API_URL}/${PHONE_NUMBER_ID}/messages`;
+        const formattedPhone = formatPhoneForWhatsApp(to);
 
         const data = {
             messaging_product: 'whatsapp',
             recipient_type: 'individual',
-            to: to,
+            to: formattedPhone,
             type: 'interactive',
             interactive: {
                 type: 'button',
@@ -137,7 +169,7 @@ export async function sendInteractiveButtons(to, body, buttons) {
             }
         });
 
-        console.log('✅ Botones interactivos enviados a WhatsApp:', to);
+        console.log('✅ Botones interactivos enviados a WhatsApp:', formattedPhone);
         return response.data;
 
     } catch (error) {
